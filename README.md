@@ -1,9 +1,5 @@
 # Wink Relay for Home Assistant
 
-![AI slop gauge: it runs](.github/ai-slop.svg)
-
-> **AI use:** Claude Code wrote the daemon patch, scripts, Home Assistant packages, wall page and this guide. A person directed the work and tested it on one Relay in daily use since September 2026. Most of the code has not been read line by line.
-
 The Wink Relay is a wall switch with a 4 inch touchscreen, two relays, two
 buttons and temperature, humidity, light and proximity sensors. Wink's cloud
 is long gone, but the hardware still works well. Inside, it runs Android 4.3.
@@ -62,3 +58,9 @@ however you like, no attribution needed.
 
 Wink and Wink Relay are trademarks of their owner. This project is not
 affiliated with or endorsed by Wink.
+
+## AI use
+
+<img src=".github/ai-slop.svg" alt="AI slop gauge: it runs" width="360">
+
+> **AI use:** Claude Code wrote the daemon patch, scripts, Home Assistant packages, wall page and this guide. A person directed the work and tested it on one Relay in daily use since September 2026. Most of the code has not been read line by line.
