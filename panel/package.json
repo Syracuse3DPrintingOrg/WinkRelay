@@ -1,0 +1,8 @@
+{
+  "name": "wink-relay-panel",
+  "private": true,
+  "description": "Test tools for the Wink Relay wall page (the build needs none)",
+  "devDependencies": {
+    "acorn": "8.19.0"
+  }
+}

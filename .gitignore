@@ -1,0 +1,15 @@
+# Your own copies, which hold addresses and passwords
+panel/config.json
+*.ini
+!daemon/wink_manager.ini.example
+secrets/
+*.token
+
+# Build output and caches
+panel/build/
+panel/node_modules/
+panel/package-lock.json
+daemon/out/
+daemon/.cache/
+device/backup/
+__pycache__/

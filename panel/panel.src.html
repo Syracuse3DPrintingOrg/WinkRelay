@@ -1,0 +1,2768 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=480,initial-scale=1,user-scalable=no">
+<title>Bathroom</title>
+<!--
+  Wall page for a Wink Relay (Android 4.3 stock browser, WebKit 534, 480x800),
+  served by Home Assistant at /local/<page>.html. Plain ES5 and -webkit- CSS on
+  purpose. No token in this file: the panel user's token sits in localStorage,
+  loaded once by opening the page with #token=<token> (docs/5-wall-dashboard.md).
+-->
+<style>
+*{margin:0;padding:0;-webkit-box-sizing:border-box;box-sizing:border-box;-webkit-tap-highlight-color:rgba(0,0,0,0)}
+html,body{width:480px;background:#05070b;color:#f3f7fc;font-family:Roboto,"Helvetica Neue",Arial,sans-serif;-webkit-user-select:none;user-select:none;-webkit-text-size-adjust:none}
+body{position:relative;height:800px}
+small{font-size:50%}
+svg{pointer-events:none}
+.cap{font-size:13px;line-height:16px;letter-spacing:2px;color:#93a1b6;text-transform:uppercase;white-space:nowrap}
+#defs{position:absolute;width:0;height:0;overflow:hidden}
+#app{position:absolute;left:0;top:0;width:480px;height:800px;overflow:hidden}
+
+/* Top corners: the clock on the left; the link and motion lines, then the
+   settings gear, on the right. Both corners stay clear of the dial's ring. */
+.corner{position:absolute;top:13px;z-index:4}
+#tl{left:16px;top:6px}
+#tr{right:92px;text-align:right}
+.clk{font-size:42px;line-height:50px;letter-spacing:-1px;white-space:nowrap}
+.clk small{font-size:16px;letter-spacing:1px;color:#aab6c6;margin-left:4px}
+.dte{font-size:16px;line-height:20px;color:#9fadc0;white-space:nowrap}
+.gear{left:400px;top:8px;width:64px;height:64px;z-index:4}
+.gear svg{left:17px;top:17px;width:30px;height:30px;fill:#aab6c6}
+.hint{font-size:13px;line-height:16px;color:#6f7d91;margin-top:5px}
+.gone{visibility:hidden}
+.link{font-size:13px;line-height:16px;color:#93a1b6;white-space:nowrap}
+.link i{display:inline-block;width:8px;height:8px;border-radius:4px;background:#3a4657;margin-right:7px;vertical-align:1px}
+.link.ok i{background:#34d399}
+.link.bad{color:#ff7a7a;font-weight:bold}
+.link.bad i{background:#ff5c5c}
+.mot{font-size:13px;line-height:16px;color:#6f7d91;margin-top:4px;white-space:nowrap;opacity:0;-webkit-transition:opacity .3s}
+.mot.show{opacity:1}
+.mot.occ{color:#b9c6d6}
+.mot svg{width:16px;height:16px;vertical-align:-3px;margin-right:4px;fill:#6f7d91}
+.mot.occ svg{fill:#7dd3fc}
+
+/* Gradient-bordered card: a neutral frame, a gradient layer that fades in, and a dark inside. */
+.card{position:absolute;border-radius:18px;background:#1a2331}
+.card .hl{position:absolute;left:0;top:0;right:0;bottom:0;border-radius:18px;opacity:0;-webkit-transition:opacity .3s}
+/* The theme's gradient; .gr marks the other elements that carry it. */
+.card .hl,.gr{background-color:#22d3ee;background-image:-webkit-linear-gradient(left,#22d3ee,#818cf8 55%,#c084fc)}
+.card.soft .hl{opacity:.5}
+.card.on .hl{opacity:1}
+/* Only the quick run buttons and a lit room card glow. */
+.qb.on .hl,.cl.on .hl{-webkit-box-shadow:0 0 14px rgba(56,189,248,.35);box-shadow:0 0 14px rgba(56,189,248,.35)}
+.card .in{position:absolute;left:2px;top:2px;right:2px;bottom:2px;border-radius:16px;background:#0b1018;-webkit-transition:opacity .3s}
+.card>div,.card>svg{position:absolute}
+
+/* Camera rows and the camera page: the picture fills the card inside its
+   2 px frame; the name sits on it, bottom left. */
+.cam{left:0;top:0;width:448px;height:252px}
+.cimg,.cmi{position:absolute;left:2px;top:2px;border-radius:16px;background:#0b1018;-o-object-fit:cover;object-fit:cover}
+.cimg{width:444px;height:248px}
+.clb{position:absolute;left:14px;bottom:12px;padding:3px 10px;border-radius:10px;background:rgba(5,7,11,.62);font-size:15px;line-height:20px;color:#e6ecf3;white-space:nowrap}
+.cnd{position:absolute;left:0;right:0;top:44%;text-align:center;font-size:16px;color:#93a1b6}
+.cmf{left:16px;top:96px;width:448px;height:340px}
+.cmi{width:444px;height:336px;-o-object-fit:contain;object-fit:contain;background:#000}
+/* In a frame about 492 x 788: the page sits in the middle, a little
+   shorter than the Wink's. */
+body.va{width:100%;height:788px}
+.va #app{left:50%;margin-left:-240px;height:788px}
+.va #home,.va .page{height:788px}
+
+/* Clock hero (html.hc): the dial, the corner clock and the gear make way. */
+.chero{display:none}
+.hc .chero{display:block;position:absolute;left:0;top:0;width:480px;height:290px}
+.hc #dial,.hc #tl,.hc #gear{display:none}
+.cht{position:absolute;left:0;right:0;top:18px;text-align:center;font-size:118px;line-height:126px;font-weight:300;letter-spacing:-3px;white-space:nowrap}
+.cht small{font-size:30px;letter-spacing:1px;color:#aab6c6;margin-left:8px}
+.chd{position:absolute;left:0;right:0;top:146px;text-align:center;font-size:24px;line-height:30px;color:#9fadc0;white-space:nowrap}
+.chw{position:absolute;left:0;right:0;top:188px;text-align:center;font-size:24px;line-height:40px;white-space:nowrap}
+.chw svg{width:40px;height:40px;vertical-align:-9px;margin-right:6px}
+.chwc{color:#9fadc0;margin-left:12px;font-size:20px}
+.chm{position:absolute;left:16px;right:16px;top:236px;text-align:center;white-space:nowrap}
+.ctm{display:inline-block;margin:0 10px;font-size:18px;line-height:24px;color:#9fadc0}
+.ctm b{margin-left:8px;font-weight:bold;color:#f3f7fc}
+.chl{position:absolute;right:16px;top:12px;font-size:13px;line-height:16px;color:#93a1b6}
+.chl.bad{color:#ff7a7a;font-weight:bold}
+.light .cht,.light .chwt{color:#1e293b}
+.light .ctm b{color:#1e293b}
+
+/* Fan dial */
+#dial{position:absolute;left:76px;top:8px;width:328px;height:328px}
+#dsvg{position:absolute;left:0;top:0}
+#halo{position:absolute;left:39px;top:39px;width:250px;height:250px;border-radius:125px;opacity:0;-webkit-box-shadow:0 0 26px rgba(34,211,238,.45),inset 0 0 22px rgba(192,132,252,.35);box-shadow:0 0 26px rgba(34,211,238,.45),inset 0 0 22px rgba(192,132,252,.35);-webkit-transition:opacity .4s}
+#halo.on{opacity:.7;-webkit-animation:pulse 2.8s ease-in-out infinite alternate}
+@-webkit-keyframes pulse{from{opacity:.35}to{opacity:.8}}
+.disc{position:absolute;left:64px;top:64px;width:200px;height:200px;border-radius:100px;background:#1a2331;-webkit-transition:-webkit-transform .12s}
+.disc .hl{position:absolute;left:0;top:0;right:0;bottom:0;border-radius:100px;opacity:.35;background:-webkit-linear-gradient(-45deg,#22d3ee,#818cf8 55%,#c084fc);-webkit-transition:opacity .3s}
+.disc.on .hl{opacity:1}
+.disc .in{position:absolute;left:2px;top:2px;right:2px;bottom:2px;border-radius:98px;background:#0a0f17}
+.disc.down,.qb.down{-webkit-transform:scale(.96)}
+.fanic{position:absolute;left:83px;top:36px;width:34px;height:34px}
+.fanic svg{width:34px;height:34px;fill:#6f7d91}
+.disc.on .fanic svg{fill:url(#gi)}
+.disc.m .fanic svg{fill:#ffb454}
+.spin{-webkit-animation:spin 1.5s linear infinite}
+@-webkit-keyframes spin{from{-webkit-transform:rotate(0deg)}to{-webkit-transform:rotate(360deg)}}
+.big{position:absolute;left:0;right:0;top:74px;text-align:center;font-size:62px;line-height:62px;letter-spacing:-1px;color:#e6ecf3;white-space:nowrap}
+.disc.on .big{color:#fff}
+.big.long{font-size:46px}
+.disc .big.dim{color:#6f7d91}
+.big small{font-size:22px;letter-spacing:0;color:#aab6c6;margin-left:4px}
+.sub{position:absolute;left:12px;right:12px;top:139px;text-align:center;font-size:18px;line-height:22px;color:#aab6c6;white-space:nowrap}
+.sub.dry{color:#67e8f9}
+.sub.warn{color:#ffc978}
+.msg{position:absolute;left:20px;right:20px;top:80px;text-align:center;font-size:21px;line-height:26px;color:#ffc978;display:none}
+.disc.m .big,.disc.m .sub{display:none}
+.disc.m .msg{display:block}
+
+/* Home rows, built from the layout: each one 448 px wide at its own top in
+   the space under the dial. */
+.row{position:absolute;left:16px;width:448px}
+
+/* Quick run buttons: the one matching the current run is filled. Tiles wear
+   the same card. */
+.qb{top:0;width:141px;height:68px;-webkit-transition:-webkit-transform .12s,opacity .3s}
+.qb.dim{opacity:.4}
+.qt{left:0;right:0;top:0;line-height:68px;text-align:center;font-size:17px;color:#9fadc0;white-space:nowrap}
+.qt b{font-size:30px;font-weight:normal;color:#f3f7fc;margin-right:4px}
+.qb.on .in,.chip.on .in{opacity:.4}
+.qb.on .qt,.qb.on .qt b{color:#fff}
+
+/* Tiles: an icon and a label with the state under them, lit while on; a
+   tile that runs something has its icon over the label instead. */
+.tln{left:8px;right:8px;top:11px;text-align:center;font-size:17px;line-height:24px;color:#e6ecf3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tln.one{top:35px;line-height:22px}
+.tls{left:8px;right:8px;top:37px;text-align:center;font-size:14px;line-height:18px;color:#8391a5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tli{width:22px;height:22px;margin-right:6px;vertical-align:-4px;fill:#8391a5}
+.tli.top{left:50%;top:9px;width:24px;height:24px;margin-left:-12px}
+.qb.on .tln,.qb.on .tls{color:#fff}
+.qb.on .tli{fill:#fff}
+
+/* Room climate. A long caption ends in an ellipsis; its 2 px of padding
+   keep the first letter's soft edge inside the clip. */
+.cl{top:0;width:218px;height:104px}
+.cl .cic{left:14px;top:30px;width:44px;height:44px;fill:url(#gi)}
+.cl .cap{left:64px;right:10px;top:13px;padding-left:2px;overflow:hidden;text-overflow:ellipsis}
+.val{left:64px;top:29px;font-size:56px;line-height:54px;letter-spacing:-1px;white-space:nowrap}
+.val small{font-size:26px;letter-spacing:0;color:#c3cddb;margin-left:2px}
+.val.t{font-size:46px;top:33px;line-height:50px}
+.val.t small{font-size:22px}
+.st{left:66px;right:10px;top:80px;font-size:15px;line-height:18px;color:#c3cddb;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st.hot{color:#67e8f9}
+
+/* Status row (the vanity light's by default): an icon, a label and the
+   state. Lit, it only frames itself, so it never looks like a control.
+   The state floats right and the label takes the room left beside it, so
+   a long label ends in an ellipsis instead of running under the state
+   (padded like the room captions). */
+.van{left:0;top:0;width:448px;height:56px}
+.vic{left:18px;top:13px;width:30px;height:30px;fill:#5d6b80}
+.van.lit .vic{fill:url(#gi)}
+.vw{left:58px;right:20px;top:0;height:56px}
+.vl{padding-left:2px;line-height:56px;font-size:13px;letter-spacing:2px;color:#93a1b6;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vs{float:right;margin-left:12px;line-height:56px;font-size:16px;color:#9fadc0;white-space:nowrap}
+.vs b{font-size:24px;font-weight:normal;color:#fff}
+.vs em{font-style:normal;color:#5d6b80;margin:0 6px}
+.vs.off{font-size:24px;color:#8391a5}
+
+/* Weather */
+.wx{left:0;top:0;width:448px;height:176px}
+.wnow{left:18px;top:12px;right:88px;height:58px}
+.wt{float:left;font-size:44px;line-height:56px;letter-spacing:-1px;margin-right:14px;white-space:nowrap}
+.wt small{font-size:22px;letter-spacing:0;color:#c3cddb;margin-left:1px}
+.wd{overflow:hidden;padding-top:1px}
+.wd .cap{overflow:hidden;text-overflow:ellipsis}
+.wc{font-size:20px;line-height:24px;color:#f3f7fc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wdd{font-size:14px;line-height:18px;color:#9fadc0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wic{right:18px;top:10px;width:60px;height:60px;fill:url(#gi)}
+.nd .wt{display:none}
+.nd .wc{color:#6f7d91}
+.nd .wic{fill:#2a3444}
+.fcl{left:18px;right:18px;top:80px;height:16px}
+.fcl>i{position:absolute;left:0;right:0;top:8px;height:1px;background:#1f2938}
+.fcl .cap{position:relative;background:#0b1018;padding-right:10px}
+.fc{left:10px;right:10px;top:102px;height:66px}
+.fcc{float:left;width:16.66%;text-align:center}
+.fh{font-size:13px;line-height:16px;color:#9fadc0;white-space:nowrap}
+.fi{display:block;width:26px;height:26px;margin:4px auto 0 auto;fill:#d6e4f5}
+.ft{font-size:18px;line-height:20px;margin-top:2px;color:#f3f7fc}
+.fcn{position:absolute;left:0;right:0;top:22px;text-align:center;font-size:15px;color:#6f7d91;display:none}
+.fc.none .fcc{display:none}
+.fc.none .fcn{display:block}
+
+/* Detail pages: one at a time, in place of home, which is then display:none
+   so the fan spin and the halo stop drawing. */
+#home,.page{position:absolute;left:0;top:0;width:480px;height:800px}
+.page{display:none;-webkit-animation:pgin .2s ease-out}
+@-webkit-keyframes pgin{from{opacity:0;-webkit-transform:translate3d(0,14px,0)}to{opacity:1;-webkit-transform:translate3d(0,0,0)}}
+.cl,.wx,.van,.back,.gear,.chip,.tab,.sw,.tg,.sb{-webkit-transition:-webkit-transform .12s}
+.cl.down,.wx.down,.van.down,.back.down,.gear.down,.chip.down,.tab.down,.sw.down,.tg.down{-webkit-transform:scale(.97)}
+.back{left:16px;top:12px;width:64px;height:64px}
+.back svg{left:15px;top:15px;width:34px;height:34px;fill:#e6ecf3}
+.ptl{position:absolute;left:96px;top:22px}
+.ptl .hint{font-size:15px;line-height:20px;color:#8391a5}
+.hic{position:absolute;left:14px;top:104px;width:54px;height:54px;fill:url(#gi)}
+.hv{position:absolute;left:72px;top:88px;font-size:80px;line-height:84px;letter-spacing:-2px;white-space:nowrap}
+.hv small{font-size:32px;letter-spacing:0;color:#c3cddb;margin-left:3px}
+.hs{position:absolute;left:77px;top:176px;font-size:20px;line-height:24px;color:#c3cddb;white-space:nowrap}
+.hs.hot{color:#67e8f9}
+.ref{position:absolute;right:18px;top:96px;text-align:right}
+.rv{font-size:36px;line-height:42px;margin-top:6px;white-space:nowrap}
+.rv svg{width:32px;height:32px;fill:url(#gi);vertical-align:-3px;margin-right:8px}
+.rv small{font-size:18px;color:#c3cddb;margin-left:1px}
+.rs{font-size:16px;line-height:20px;color:#9fadc0;margin-top:2px;white-space:nowrap}
+.gc{left:16px;top:220px;width:448px;height:446px}
+.gs{left:2px;top:2px}
+.gs text{font-family:Roboto,"Helvetica Neue",Arial,sans-serif;font-size:15px;fill:#8391a5}
+.gs .tv{font-size:17px;fill:#f3f7fc}
+.gs .pv{font-size:14px;fill:#7dd3fc}
+.gs .nw{fill:#c3cddb}
+.gm{left:20px;right:20px;top:46%;text-align:center;font-size:20px;line-height:26px;color:#8391a5}
+.gm.err{color:#ffc978}
+.lgd{left:20px;top:14px;font-size:15px;line-height:18px;color:#9fadc0;white-space:nowrap}
+.lgd i{display:inline-block;width:22px;height:4px;margin:0 8px 0 18px;vertical-align:4px}
+.lgd i.l1{margin-left:0}
+.lgd i.l2{height:0;border-top:2px dashed #aab6c6}
+.lgd i.l3{width:14px;height:14px;vertical-align:-2px;background:#113f4b;border-top:4px solid #22d3ee}
+/* A humidity card with no usual level leaves that out of the legend. */
+.hid{display:none}
+.sc{top:678px;width:141px;height:110px}
+.sc .cap{left:0;right:0;top:14px;text-align:center}
+.sv{left:0;right:0;top:36px;text-align:center;font-size:36px;line-height:40px;white-space:nowrap}
+.sv small{font-size:18px;color:#c3cddb;margin-left:1px}
+.ss{left:0;right:0;top:80px;text-align:center;font-size:15px;line-height:18px;color:#9fadc0;white-space:nowrap}
+.fcl.sec{top:12px}
+.rl{position:absolute;right:0;top:0;padding-left:10px;background:#0b1018;font-size:14px;line-height:16px;color:#7dd3fc}
+.rl i{display:inline-block;width:8px;height:11px;border-radius:2px;background:#38bdf8;margin-right:6px;vertical-align:-1px}
+.wcd{left:16px;width:448px}
+.wbi{left:16px;top:34px;width:76px;height:76px;fill:url(#gi)}
+.wbt{left:106px;top:32px;font-size:56px;line-height:60px;letter-spacing:-1px;white-space:nowrap}
+.wbt small{font-size:26px;letter-spacing:0;color:#c3cddb;margin-left:1px}
+.wbc{left:109px;top:92px;font-size:20px;line-height:24px;white-space:nowrap}
+.whl{right:20px;top:36px;text-align:right;font-size:17px;line-height:30px;color:#9fadc0;white-space:nowrap}
+.whl b{font-size:24px;font-weight:normal;color:#f3f7fc;margin-left:6px}
+.wst{left:18px;right:10px;top:124px;height:46px}
+.wsc{float:left;width:33%}
+.wsv{font-size:20px;line-height:24px;margin-top:5px;white-space:nowrap;color:#f3f7fc}
+.wsv small{font-size:16px;color:#9fadc0;margin-left:5px}
+.wk{left:0;right:0;top:34px}
+.wr{position:relative;height:38px;border-top:1px solid #151d29}
+.wr:first-child{border-top:0}
+.wr div,.wr svg{position:absolute}
+.wdn{left:18px;line-height:37px;font-size:18px;color:#e6ecf3}
+.wri{left:82px;top:4px;width:28px;height:28px}
+.wrp{left:118px;line-height:37px;font-size:15px;color:#7dd3fc;white-space:nowrap}
+.wrl{left:170px;width:58px;text-align:right;line-height:37px;font-size:18px;color:#9fadc0}
+.wtr{left:242px;top:14px;width:132px;height:8px;border-radius:4px;background:#1a2331}
+.wtr i{position:absolute;top:0;height:8px;border-radius:4px;-webkit-background-size:132px 8px;background-size:132px 8px}
+.wtr b{position:absolute;top:-3px;width:14px;height:14px;margin-left:-7px;border-radius:7px;background:#f4fbff;border:3px solid #0b1018}
+.wrh{left:388px;line-height:37px;font-size:18px;color:#f3f7fc}
+/* Alert banner over the top of home. An alarm takes the whole dial area in
+   red and pulses slowly (the only continuous animation besides the running
+   fan); the buttons and cards under it stay usable. Info is a calm card in
+   the theme's colours. One tap anywhere on either dismisses it. */
+.alert{display:none;z-index:6}
+.alert.alarm,.alert.info{display:block}
+.alarm{left:0;top:0;width:480px;height:338px;border-radius:0 0 22px 22px;background:#6b0d0f;-webkit-box-shadow:0 4px 18px rgba(0,0,0,.8);box-shadow:0 4px 18px rgba(0,0,0,.8)}
+.alarm .hl,.alarm .in,.info .apl,.info .adh{display:none}
+.apl{left:0;top:0;right:0;bottom:0;border-radius:0 0 22px 22px;background:-webkit-linear-gradient(top,#e3262b,#b3161b)}
+.alarm .apl{-webkit-animation:apulse 1.6s ease-in-out infinite alternate}
+@-webkit-keyframes apulse{from{opacity:.3}to{opacity:1}}
+.aic{left:192px;top:30px;width:96px;height:96px;fill:#fff}
+.alt{left:24px;right:24px;top:136px;text-align:center;font-size:46px;line-height:54px;font-weight:bold;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.alm{left:28px;right:28px;top:194px;max-height:84px;overflow:hidden;text-align:center;font-size:23px;line-height:28px;color:#ffe9e9}
+.adh{left:0;right:0;top:298px;text-align:center;font-size:14px;line-height:16px;letter-spacing:2px;text-transform:uppercase;color:#ffc4c4}
+.ax{right:18px;top:18px;width:34px;height:34px;fill:#fff}
+.alarm .alt.m{font-size:38px}
+.alarm .alt.s{font-size:30px}
+.alarm.l2 .aic{top:44px}
+.alarm.l2 .alt{top:150px}
+.alarm.l2 .alm{top:208px}
+.alarm.l1 .aic{top:58px}
+.alarm.l0 .aic{top:72px}
+.alarm.l1 .alt{top:164px}
+.alarm.l0 .alt{top:180px}
+.alarm.l1 .alm{top:222px}
+.info{left:16px;top:8px;width:448px;height:80px;-webkit-box-shadow:0 6px 18px rgba(0,0,0,.7);box-shadow:0 6px 18px rgba(0,0,0,.7)}
+.info .hl{opacity:1}
+.info .aic{left:18px;top:18px;width:44px;height:44px;fill:url(#gi)}
+.info .alt,.info .alm{left:76px;right:56px;text-align:left;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
+.info .alt{top:11px;font-size:22px;line-height:28px;font-weight:normal;color:#f3f7fc}
+.info .alm{top:42px;max-height:24px;font-size:16px;line-height:22px;color:#c3cddb}
+.info .ax{right:18px;top:26px;width:28px;height:28px;fill:#8391a5}
+.info.one .alt{top:25px}
+
+/* Quick settings: two tabs of rows. A row is a caption over chips like the
+   quick run buttons, a switch row like the vanity card, or two time steppers.
+   Tabs are quieter than the chips: an underline in the theme's gradient. */
+.tabs{position:absolute;left:16px;top:86px;width:448px;height:64px}
+.tab{top:0;width:220px;height:64px}
+.tt{left:0;right:0;top:0;line-height:62px;text-align:center;font-size:19px;color:#8391a5;white-space:nowrap}
+.ti{width:26px;height:26px;margin-right:10px;vertical-align:-6px;fill:#5d6b80}
+.tub{left:44px;right:44px;bottom:7px;height:4px;border-radius:2px;opacity:0;-webkit-transition:opacity .2s}
+.tab.on .hl{opacity:.5}
+.tab.on .tub{opacity:1}
+.tab.on .tt{color:#f3f7fc}
+.tab.on .ti{fill:url(#gi)}
+.spn{display:none}
+.spn.on{display:block}
+.srw{position:absolute;left:16px;width:448px;-webkit-transition:opacity .3s}
+.srw.dim{opacity:.4}
+.sr{position:absolute;left:0;right:0;top:0;height:16px}
+.sx{position:absolute;right:0;top:0;font-size:14px;line-height:16px;color:#ffc978;white-space:nowrap}
+.chip,.sw{top:22px;height:64px}
+.ct{left:0;right:0;top:0;line-height:64px;text-align:center;font-size:16px;color:#9fadc0;white-space:nowrap}
+.ct b{font-size:26px;font-weight:normal;color:#f3f7fc;margin-right:3px}
+.ct.c1,.ct.c2{font-size:19px;color:#e6ecf3}
+.ct.c2{top:9px;line-height:26px}
+.cs{left:0;right:0;top:36px;text-align:center;font-size:13px;line-height:16px;color:#8391a5;white-space:nowrap}
+.ci{width:24px;height:24px;margin-right:8px;vertical-align:-5px;fill:#8391a5}
+.chip.on .ct,.chip.on .ct b,.chip.on .cs{color:#fff}
+.chip.on .ci{fill:#fff}
+.sw{height:88px}
+.sg{left:31px;top:10px;width:44px;height:44px;border-radius:22px}
+.sg i{position:absolute;left:13px;top:13px;width:18px;height:18px;border-radius:9px;background:#0b1018}
+.sn{left:0;right:0;top:59px;text-align:center;font-size:16px;line-height:20px;color:#9fadc0}
+.sck{right:8px;top:8px;width:20px;height:20px;fill:#fff;display:none}
+.sw .hl{opacity:.3}
+.sw.on .hl{opacity:1}
+.sw.on .sn{color:#fff}
+.sw.on .sck{display:block}
+.tg{left:0;top:0;width:448px;height:64px}
+.tgi{left:18px;top:17px;width:30px;height:30px;fill:#5d6b80}
+.tg.lit .tgi{fill:url(#gi)}
+.tgl{left:62px;top:11px;font-size:18px;line-height:22px;color:#e6ecf3;white-space:nowrap}
+.tgs{left:62px;top:35px;font-size:14px;line-height:18px;color:#8391a5;white-space:nowrap}
+.swt{right:16px;top:16px;width:60px;height:32px;border-radius:16px;background:#243044}
+.swg{position:absolute;left:0;top:0;width:60px;height:32px;border-radius:16px;opacity:0;-webkit-transition:opacity .2s}
+.swk{position:absolute;left:4px;top:4px;width:24px;height:24px;border-radius:12px;background:#7c8a9e;-webkit-transition:-webkit-transform .2s}
+.lit .swg{opacity:1}
+.lit .swk{background:#fff;-webkit-transform:translate(28px,0)}
+.stp{top:22px;width:220px;height:64px}
+.sb{top:0;width:64px;height:64px}
+.sbc{position:absolute;left:10px;top:10px;width:44px;height:44px;border-radius:22px;background:#162030}
+.sbc svg{position:absolute;left:8px;top:8px;width:28px;height:28px;fill:#c3cddb}
+.sb.down{-webkit-transform:scale(.9)}
+.stv{left:64px;right:64px;top:9px;text-align:center}
+.stv .cap{font-size:11px;line-height:14px;letter-spacing:1.5px}
+.stt{font-size:21px;line-height:28px;margin-top:3px;white-space:nowrap}
+.stt small{font-size:14px;color:#c3cddb;margin-left:3px}
+.ptl .hint.warn{color:#ffc978}
+
+/* Themes: a class on <html>. The SVG gradients get the same colours from JS.
+   Each swatch in settings always shows its own theme. */
+#c-theme0 .hl,#c-theme0 .sg{background-color:#22d3ee;background-image:-webkit-linear-gradient(left,#22d3ee,#818cf8 55%,#c084fc)}
+.t-ocean .hl,.t-ocean .gr,#c-theme1 .hl,#c-theme1 .sg{background-color:#2dd4bf;background-image:-webkit-linear-gradient(left,#2dd4bf,#0ea5e9 55%,#3b6cf0)}
+.t-ember .hl,.t-ember .gr,#c-theme2 .hl,#c-theme2 .sg{background-color:#fbbf24;background-image:-webkit-linear-gradient(left,#fbbf24,#fb8c3c 55%,#f4506e)}
+.t-mono .hl,.t-mono .gr,#c-theme3 .hl,#c-theme3 .sg{background-color:#8b98ab;background-image:-webkit-linear-gradient(left,#8b98ab,#c7d0dc 55%,#f8fafc)}
+.t-ocean .disc .hl{background-image:-webkit-linear-gradient(-45deg,#2dd4bf,#0ea5e9 55%,#3b6cf0)}
+.t-ember .disc .hl{background-image:-webkit-linear-gradient(-45deg,#fbbf24,#fb8c3c 55%,#f4506e)}
+.t-mono .disc .hl{background-image:-webkit-linear-gradient(-45deg,#8b98ab,#c7d0dc 55%,#f8fafc)}
+.t-ocean .qb.on .hl,.t-ocean .cl.on .hl{-webkit-box-shadow:0 0 14px rgba(45,212,191,.35);box-shadow:0 0 14px rgba(45,212,191,.35)}
+.t-ember .qb.on .hl,.t-ember .cl.on .hl{-webkit-box-shadow:0 0 14px rgba(251,140,60,.35);box-shadow:0 0 14px rgba(251,140,60,.35)}
+.t-mono .qb.on .hl,.t-mono .cl.on .hl{-webkit-box-shadow:0 0 14px rgba(226,232,240,.2);box-shadow:0 0 14px rgba(226,232,240,.2)}
+.t-ocean #halo{-webkit-box-shadow:0 0 26px rgba(45,212,191,.45),inset 0 0 22px rgba(59,108,240,.4);box-shadow:0 0 26px rgba(45,212,191,.45),inset 0 0 22px rgba(59,108,240,.4)}
+.t-ember #halo{-webkit-box-shadow:0 0 26px rgba(251,191,36,.4),inset 0 0 22px rgba(244,80,110,.35);box-shadow:0 0 26px rgba(251,191,36,.4),inset 0 0 22px rgba(244,80,110,.35)}
+.t-mono #halo{-webkit-box-shadow:0 0 26px rgba(226,232,240,.3),inset 0 0 22px rgba(139,152,171,.3);box-shadow:0 0 26px rgba(226,232,240,.3),inset 0 0 22px rgba(139,152,171,.3)}
+.t-ocean .hot,.t-ocean .dry{color:#5eead4}
+.t-ember .hot,.t-ember .dry{color:#fcd34d}
+.t-mono .hot,.t-mono .dry{color:#f1f5f9}
+.t-ocean .occ svg{fill:#5eead4}
+.t-ember .occ svg{fill:#fcd34d}
+.t-mono .occ svg{fill:#e2e8f0}
+.t-ocean .lgd i.l3{background:#133f40;border-top-color:#2dd4bf}
+.t-ember .lgd i.l3{background:#443a1b;border-top-color:#fbbf24}
+.t-mono .lgd i.l3{background:#29313b;border-top-color:#8b98ab}
+.t-mono .qb.on .in,.t-mono .chip.on .in{opacity:.6}
+
+/* Night: near black, dimmer text and accents, muted gradients, no glows or
+   halos. The Relay dims the backlight itself. */
+html.night,.night body{background:#000}
+.night body{color:#b4bdc9}
+.night .big,.night .disc.on .big,.night .qt b,.night .qb.on .qt,.night .qb.on .qt b,.night .tln,.night .qb.on .tln,.night .qb.on .tls,.night .chip.on .ct b,.night .vs b,.night .wc,.night .ft,.night .wsv,.night .whl b,.night .wdn,.night .wrh,.night .ct b,.night .ct.c1,.night .ct.c2,.night .chip.on .ct,.night .tab.on .tt,.night .tgl,.night .sw.on .sn,.night .info .alt{color:#b4bdc9}
+.night .cap,.night .link,.night .vl,.night .dte,.night .qt,.night .tls,.night .vs,.night .wdd,.night .fh,.night .rs,.night .ss,.night .whl,.night .lgd,.night .wrl,.night .gm,.night .ptl .hint,.night .tt,.night .ct,.night .cs,.night .chip.on .cs,.night .tgs,.night .sn,.night .fcn{color:#6f7a8b}
+.night .clk small,.night .big small,.night .sub,.night .val small,.night .st,.night .wt small,.night .hv small,.night .hs,.night .rv small,.night .sv small,.night .wbt small,.night .stt small,.night .info .alm{color:#858f9f}
+.night .hint,.night .mot,.night .vs em{color:#4d5767}
+.night .vs.off{color:#6f7a8b}
+.night .link.ok i{background:#1d7a58}
+.night .hot,.night .dry,.night .sx{opacity:.8}
+.night .card,.night .disc{background:#0f141b}
+.night .card .in,.night .disc .in{background:#030406}
+.night .fcl .cap,.night .rl{background:#030406}
+.night .fcl>i{background:#10151c}
+.night .wr{border-top-color:#0c1016}
+.night .card.soft .hl,.night .sw .hl{opacity:.28}
+.night .card.on .hl,.night .disc.on .hl,.night .info .hl{opacity:.55;-webkit-box-shadow:none;box-shadow:none}
+.night .tab.on .hl{opacity:.28}
+.night .disc .hl{opacity:.2}
+.night .qb.on .in,.night .chip.on .in{opacity:.62}
+.night #halo{display:none}
+.night .fanic svg,.night .vic,.night .mot svg,.night .tgi,.night .ci,.night .tli,.night .ti,.night .info .ax{fill:#4d5767}
+.night .back svg,.night .gear svg,.night .sbc svg,.night .chip.on .ci,.night .qb.on .tli{fill:#858f9f}
+.night .sbc{background:#0c1119}
+.night .swt,.night .wtr{background:#141a23}
+.night .swk{background:#4d5767}
+.night .lit .swk,.night .wtr b{background:#b4bdc9}
+.night .wtr b{border-color:#030406}
+.night .gs text{fill:#6f7a8b}
+.night .gs .tv{fill:#b4bdc9}
+.night .gs .nw{fill:#858f9f}
+.night .gs .pv{fill:#4d88a8}
+.night .sg{opacity:.75}
+.night .sg i{background:#030406}
+.night .lit .swg{opacity:.55}
+.night .tab.on .tub{opacity:.6}
+.night .wtr i,.night .lgd i.l1{opacity:.65}
+
+/* Light: the day look while "Light screen by day" is on (the default). White
+   cards with a thin frame and a soft still shadow on pale grey, near-black
+   values, grey captions, and each theme in deeper colours that read on white.
+   Nothing moves here that does not move in the dark look. */
+html.light,.light body{background:#eef2f6}
+.light body{color:#0f1a2b}
+.light .card,.light .disc{background:#dde3eb}
+.light .card .in,.light .disc .in,.light .fcl .cap,.light .rl,.light .sg i{background:#fff}
+.light .card{-webkit-box-shadow:0 1px 4px rgba(15,26,43,.07);box-shadow:0 1px 4px rgba(15,26,43,.07)}
+.light .cap,.light .link,.light .hint,.light .mot,.light .vl,.light .qt,.light .tls,.light .vs,.light .vs.off,.light .wdd,.light .fh,.light .fcn,.light .nd .wc,.light .rs,.light .ss,.light .whl,.light .lgd,.light .wrl,.light .gm,.light .ptl .hint,.light .tt,.light .ct,.light .cs,.light .tgs,.light .sn,.light .clk small,.light .big small,.light .val small,.light .wt small,.light .hv small,.light .rv small,.light .sv small,.light .wbt small,.light .stt small,.light .wsv small{color:#5e6d82}
+.light .dte,.light .sub,.light .st,.light .hs,.light .mot.occ,.light .info .alm{color:#475569}
+.light .big,.light .disc.on .big,.light .qt b,.light .tln,.light .vs b,.light .wc,.light .ft,.light .wsv,.light .whl b,.light .wdn,.light .wrh,.light .ct b,.light .ct.c1,.light .ct.c2,.light .tab.on .tt,.light .tgl,.light .sw.on .sn,.light .info .alt{color:#0f1a2b}
+.light .chip.on .ct,.light .chip.on .cs{color:#fff}
+.light .disc .big.dim{color:#7f8da1}
+.light .vs em{color:#c5cedb}
+.light .link i{background:#c5cedb}
+.light .link.ok i{background:#10b981}
+.light .link.bad{color:#b91c1c}
+.light .link.bad i{background:#ef4444}
+.light .sub.warn,.light .msg,.light .sx,.light .gm.err,.light .ptl .hint.warn{color:#b45309}
+.light .fanic svg,.light .vic,.light .mot svg,.light .tgi,.light .ti{fill:#76859b}
+.light .nd .wic{fill:#cbd5e1}
+.light .disc.m .fanic svg{fill:#d97706}
+.light .ci,.light .tli,.light .info .ax{fill:#5e6d82}
+.light .gear svg,.light .sbc svg{fill:#475569}
+.light .back svg,.light .sck{fill:#0f1a2b}
+.light .hot,.light .dry,.light .occ svg{color:#0e7490;fill:#0e7490}
+.light.t-ocean .hot,.light.t-ocean .dry,.light.t-ocean .occ svg{color:#0f766e;fill:#0f766e}
+.light.t-ember .hot,.light.t-ember .dry,.light.t-ember .occ svg{color:#c2410c;fill:#c2410c}
+.light.t-mono .hot,.light.t-mono .dry,.light.t-mono .occ svg{color:#1e293b;fill:#1e293b}
+.light .qb.on .in,.light .chip.on .in{opacity:0}
+.light .fcl>i{background:#e5eaf0}
+.light .wr{border-top-color:#edf1f5}
+.light .wtr,.light .sbc{background:#eaeef3}
+.light .wtr b{background:#1e293b;border-color:#fff}
+.light .rl,.light .wrp{color:#0369a1}
+.light .rl i{background:#0ea5e9}
+.light .swt{background:#cfd7e2}
+.light .swk{background:#fff;-webkit-box-shadow:0 1px 3px rgba(15,26,43,.3);box-shadow:0 1px 3px rgba(15,26,43,.3)}
+.light .lgd i.l2{border-top-color:#475569}
+.light .gs text{fill:#5e6d82}
+.light .gs .tv{fill:#0f1a2b}
+.light .gs .nw{fill:#475569}
+.light .gs .pv{fill:#0369a1}
+.light .info{-webkit-box-shadow:0 6px 18px rgba(15,26,43,.16);box-shadow:0 6px 18px rgba(15,26,43,.16)}
+.light .alarm{background:#6b0d0f;-webkit-box-shadow:0 6px 22px rgba(127,29,29,.35);box-shadow:0 6px 22px rgba(127,29,29,.35)}
+/* The four themes on white; each swatch still shows its own. */
+.light .hl,.light .gr,.light #c-theme0 .hl,.light #c-theme0 .sg{background-color:#0891b2;background-image:-webkit-linear-gradient(left,#0891b2,#6366f1 55%,#7c3aed)}
+.light.t-ocean .hl,.light.t-ocean .gr,.light #c-theme1 .hl,.light #c-theme1 .sg{background-color:#0d9488;background-image:-webkit-linear-gradient(left,#0d9488,#0277bd 55%,#1d4ed8)}
+.light.t-ember .hl,.light.t-ember .gr,.light #c-theme2 .hl,.light #c-theme2 .sg{background-color:#c96a06;background-image:-webkit-linear-gradient(left,#c96a06,#d9480f 55%,#db1f48)}
+.light.t-mono .hl,.light.t-mono .gr,.light #c-theme3 .hl,.light #c-theme3 .sg{background-color:#64748b;background-image:-webkit-linear-gradient(left,#64748b,#475569 55%,#1e293b)}
+.light .disc .hl{background-image:-webkit-linear-gradient(-45deg,#0891b2,#6366f1 55%,#7c3aed)}
+.light.t-ocean .disc .hl{background-image:-webkit-linear-gradient(-45deg,#0d9488,#0277bd 55%,#1d4ed8)}
+.light.t-ember .disc .hl{background-image:-webkit-linear-gradient(-45deg,#c96a06,#d9480f 55%,#db1f48)}
+.light.t-mono .disc .hl{background-image:-webkit-linear-gradient(-45deg,#64748b,#475569 55%,#1e293b)}
+.light .qb.on .hl,.light .cl.on .hl{-webkit-box-shadow:0 3px 12px rgba(8,145,178,.3);box-shadow:0 3px 12px rgba(8,145,178,.3)}
+.light.t-ocean .qb.on .hl,.light.t-ocean .cl.on .hl{-webkit-box-shadow:0 3px 12px rgba(13,148,136,.3);box-shadow:0 3px 12px rgba(13,148,136,.3)}
+.light.t-ember .qb.on .hl,.light.t-ember .cl.on .hl{-webkit-box-shadow:0 3px 12px rgba(217,72,15,.28);box-shadow:0 3px 12px rgba(217,72,15,.28)}
+.light.t-mono .qb.on .hl,.light.t-mono .cl.on .hl{-webkit-box-shadow:0 3px 12px rgba(30,41,59,.25);box-shadow:0 3px 12px rgba(30,41,59,.25)}
+.light #halo{-webkit-box-shadow:0 0 24px rgba(8,145,178,.35),inset 0 0 20px rgba(124,58,237,.22);box-shadow:0 0 24px rgba(8,145,178,.35),inset 0 0 20px rgba(124,58,237,.22)}
+.light.t-ocean #halo{-webkit-box-shadow:0 0 24px rgba(13,148,136,.35),inset 0 0 20px rgba(29,78,216,.22);box-shadow:0 0 24px rgba(13,148,136,.35),inset 0 0 20px rgba(29,78,216,.22)}
+.light.t-ember #halo{-webkit-box-shadow:0 0 24px rgba(201,106,6,.3),inset 0 0 20px rgba(219,31,72,.2);box-shadow:0 0 24px rgba(201,106,6,.3),inset 0 0 20px rgba(219,31,72,.2)}
+.light.t-mono #halo{-webkit-box-shadow:0 0 24px rgba(30,41,59,.2),inset 0 0 20px rgba(100,116,139,.2);box-shadow:0 0 24px rgba(30,41,59,.2),inset 0 0 20px rgba(100,116,139,.2)}
+.light .lgd i.l3{background:#dcf0f4;border-top-color:#0891b2}
+.light.t-ocean .lgd i.l3{background:#ddf0ee;border-top-color:#0d9488}
+.light.t-ember .lgd i.l3{background:#f7eadc;border-top-color:#c96a06}
+.light.t-mono .lgd i.l3{background:#e9ecef;border-top-color:#64748b}
+
+</style>
+</head>
+<body>
+<!-- Icons: Material Design Icons by Pictogrammers (Apache License 2.0) -->
+<svg id="defs" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="0" height="0">
+<defs>
+<linearGradient id="gi" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22d3ee"/><stop offset=".55" stop-color="#818cf8"/><stop offset="1" stop-color="#c084fc"/></linearGradient>
+<linearGradient id="gl" gradientUnits="userSpaceOnUse" x1="40" y1="0" x2="424" y2="0"><stop offset="0" stop-color="#22d3ee"/><stop offset=".55" stop-color="#818cf8"/><stop offset="1" stop-color="#c084fc"/></linearGradient>
+<linearGradient id="gf" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#22d3ee" stop-opacity=".28"/><stop offset="1" stop-color="#818cf8" stop-opacity="0"/></linearGradient>
+<!--ICONS-->
+</defs>
+</svg>
+
+<div id="app">
+<div id="home">
+<div id="tl" class="corner"><div id="clk" class="clk">&nbsp;</div><div id="dte" class="dte">&nbsp;</div></div>
+<div id="tr" class="corner">
+<div id="link" class="link"><i></i><span id="linkT">Connecting</span></div>
+<div id="mot" class="mot"><svg viewBox="0 0 24 24"><use id="motU" xlink:href="#i-ms" width="24" height="24"/></svg><span id="motT"></span></div>
+</div>
+<div id="gear" class="card soft gear" data-tap="page" data-page="settings"><div class="hl"></div><div class="in"></div><svg viewBox="0 0 24 24"><use xlink:href="#i-cg" width="24" height="24"/></svg></div>
+
+<div id="dial" data-dial="1">
+<div id="halo"></div>
+<svg id="dsvg" width="328" height="328" viewBox="0 0 328 328">
+<defs><linearGradient id="ga" gradientUnits="userSpaceOnUse" x1="70" y1="40" x2="258" y2="288"><stop offset="0" stop-color="#22d3ee"/><stop offset=".55" stop-color="#818cf8"/><stop offset="1" stop-color="#c084fc"/></linearGradient></defs>
+<g id="dl" font-size="21" fill="#c3cddb" text-anchor="middle" font-family="Roboto,'Helvetica Neue',Arial,sans-serif"><text x="164" y="22">OFF</text><text x="314" y="172">15</text><text x="164" y="322">30</text><text x="14" y="172">45</text></g>
+<!-- Minute ticks as dashes, left out under the labels -->
+<circle id="tk1" cx="164" cy="164" r="137" fill="none" stroke="#8fa0bd" stroke-opacity=".3" stroke-width="4" stroke-dasharray="1.2 13.15 1.2 13.15 1.2 13.15 1.2 13.15 1.2 13.15 1.2 13.15 1.2 13.15 1.2 13.15 1.2 13.15 1.2 13.15 1.2 13.15 1.2 13.15 1.2 13.15 1.2 27.49" stroke-dashoffset="201.4525"/>
+<circle id="tk2" cx="164" cy="164" r="137" fill="none" stroke="#b4c2dc" stroke-opacity=".6" stroke-width="8" stroke-dasharray="2.4 69.333 2.4 141.0661" stroke-dashoffset="144.6661"/>
+<circle cx="164" cy="164" r="130" fill="none" stroke="url(#ga)" stroke-width="2" opacity=".75"/>
+<circle id="trk" cx="164" cy="164" r="118" fill="none" stroke="#111823" stroke-width="14"/>
+<circle id="trg" cx="164" cy="164" r="118" fill="none" stroke="url(#ga)" stroke-width="14" opacity=".14"/>
+<path id="glow" d="M164 46A118 118 0 1 1 164 282A118 118 0 1 1 164 46" fill="none" stroke="url(#ga)" stroke-width="28" stroke-linecap="round" opacity=".2" stroke-dasharray="0 1000" visibility="hidden"/>
+<path id="arc" d="M164 46A118 118 0 1 1 164 282A118 118 0 1 1 164 46" fill="none" stroke="url(#ga)" stroke-width="14" stroke-linecap="round" stroke-dasharray="0 1000" visibility="hidden"/>
+<circle id="knobG" cx="164" cy="46" r="21" fill="#22d3ee" opacity=".22" visibility="hidden"/>
+<circle id="knob" cx="164" cy="46" r="12" fill="#3d4a5d" stroke="#0a0f17" stroke-width="2"/>
+</svg>
+<div id="fan" class="disc" data-tap="fan">
+<div class="hl"></div><div class="in"></div>
+<div id="fanIc" class="fanic"><svg viewBox="0 0 24 24"><use id="fanU" xlink:href="#i-fx" width="24" height="24"/></svg></div>
+<div id="big" class="big">--</div>
+<div id="sub" class="sub">Connecting</div>
+<div id="msg" class="msg"></div>
+</div>
+</div>
+
+<!-- The clock hero, in place of the dial on a panel whose layout asks for it. -->
+<div id="chero" class="chero">
+<div id="chT" class="cht">&nbsp;</div>
+<div id="chD" class="chd">&nbsp;</div>
+<div id="chW" class="chw gone"><svg viewBox="0 0 24 24"><use id="chWu" xlink:href="#i-cl" width="24" height="24"/></svg><span id="chWt" class="chwt">--</span><span id="chWc" class="chwc">&nbsp;</span></div>
+<div id="chM" class="chm gone"></div>
+<div id="chL" class="chl"></div>
+</div>
+
+
+<!-- The rows under the dial, built from the layout in the script. -->
+<div id="rows"></div>
+
+<div id="alert" class="card alert" data-tap="alert">
+<div class="hl"></div><div class="in"></div><div class="apl"></div>
+<svg class="aic" viewBox="0 0 24 24"><use id="alU" xlink:href="#i-br" width="24" height="24"/></svg>
+<div id="alT" class="alt"></div>
+<div id="alM" class="alm"></div>
+<div class="adh">Tap to dismiss</div>
+<svg class="ax" viewBox="0 0 24 24"><use xlink:href="#i-x" width="24" height="24"/></svg>
+</div>
+</div>
+
+<!-- Detail pages, each for the card that opened it. Each gets its back button
+     from build(). -->
+<div id="page-temp" class="page">
+<div class="ptl"><div id="tpL" class="cap">Temperature</div><div class="hint">Last 24 hours</div></div>
+<svg class="hic" viewBox="0 0 24 24"><use id="tpI" xlink:href="#i-th" width="24" height="24"/></svg>
+<div id="tpV" class="hv">--</div>
+<div id="tpS" class="hs"></div>
+<div id="tpR" class="ref"><div class="cap">Outside now</div><div class="rv"><svg viewBox="0 0 24 24"><use id="tpOu" xlink:href="#i-cl" width="24" height="24"/></svg><span id="tpO">--</span></div><div id="tpOc" class="rs">&nbsp;</div></div>
+<div class="card soft gc"><div class="hl"></div><div class="in"></div><svg id="tpG" class="gs" width="444" height="442" data-top="22"></svg><div id="tpM" class="gm"></div></div>
+<div id="tpA" class="card soft sc" style="left:16px"><div class="hl"></div><div class="in"></div><div class="cap">Low</div><div id="tpA1" class="sv">--</div><div id="tpA2" class="ss"></div></div>
+<div id="tpB" class="card soft sc" style="left:169px;width:142px"><div class="hl"></div><div class="in"></div><div class="cap">Average</div><div id="tpB1" class="sv">--</div><div id="tpB2" class="ss"></div></div>
+<div id="tpC" class="card soft sc" style="left:323px"><div class="hl"></div><div class="in"></div><div class="cap">High</div><div id="tpC1" class="sv">--</div><div id="tpC2" class="ss"></div></div>
+</div>
+
+<div id="page-humidity" class="page">
+<div class="ptl"><div id="hpL" class="cap">Humidity</div><div class="hint">Last 24 hours</div></div>
+<svg class="hic" viewBox="0 0 24 24"><use id="hpI" xlink:href="#i-wp" width="24" height="24"/></svg>
+<div id="hpV" class="hv">--</div>
+<div id="hpS" class="hs"></div>
+<div class="ref"><div class="cap">Usual now</div><div id="hpU" class="rv">--</div><div id="hpF" class="rs">&nbsp;</div></div>
+<div class="card soft gc"><div class="hl"></div><div class="in"></div>
+<div class="lgd"><i class="l1 gr"></i>Humidity<span id="hpLu"><i class="l2"></i>Usual</span><i class="l3"></i>Fan on</div>
+<svg id="hpG" class="gs" width="444" height="442" data-top="50"></svg><div id="hpM" class="gm"></div></div>
+<div id="hpA" class="card soft sc" style="left:16px"><div class="hl"></div><div class="in"></div><div class="cap">Low</div><div id="hpA1" class="sv">--</div><div id="hpA2" class="ss"></div></div>
+<div id="hpB" class="card soft sc" style="left:169px;width:142px"><div class="hl"></div><div class="in"></div><div class="cap">High</div><div id="hpB1" class="sv">--</div><div id="hpB2" class="ss"></div></div>
+<div id="hpC" class="card soft sc" style="left:323px"><div class="hl"></div><div class="in"></div><div class="cap">Fan ran</div><div id="hpC1" class="sv">--</div><div id="hpC2" class="ss"></div></div>
+</div>
+
+<div id="page-weather" class="page">
+<div class="ptl"><div class="cap">Weather</div><div id="wpD" class="hint">&nbsp;</div></div>
+<div id="wcT" class="card soft wcd" style="top:86px;height:180px"><div class="hl"></div><div class="in"></div>
+<div class="fcl sec"><i></i><span class="cap">Today</span></div>
+<svg class="wbi" viewBox="0 0 24 24"><use id="wtU" xlink:href="#i-cl" width="24" height="24"/></svg>
+<div id="wtT" class="wbt">--</div>
+<div id="wtC" class="wbc">&nbsp;</div>
+<div class="whl"><div>High<b id="wtHi">--</b></div><div>Low<b id="wtLo">--</b></div></div>
+<div class="wst"><div class="wsc"><div class="cap">Humidity</div><div id="wtHu" class="wsv">--</div></div><div class="wsc"><div class="cap">Wind</div><div id="wtW" class="wsv">--</div></div><div class="wsc"><div class="cap">UV index</div><div id="wtV" class="wsv">--</div></div></div>
+</div>
+<div id="wcH" class="card soft wcd" style="top:278px;height:228px"><div class="hl"></div><div class="in"></div>
+<div class="fcl sec"><i></i><span class="cap">Next 24 hours</span><span id="whR" class="rl gone"><i></i>Rain, in</span></div>
+<svg id="whG" class="gs" width="444" height="186" style="top:36px"></svg><div id="whM" class="gm"></div></div>
+<div id="wcW" class="card soft wcd" style="top:518px;height:270px"><div class="hl"></div><div class="in"></div>
+<div class="fcl sec"><i></i><span class="cap">This week</span></div>
+<div id="wk" class="wk"></div><div id="wkM" class="gm"></div></div>
+</div>
+
+<!-- A camera, live: from a camera row, or a pop-up HA sends. -->
+<div id="page-camera" class="page">
+<div class="ptl"><div id="cmL" class="cap">Camera</div><div id="cmH" class="hint">Live</div></div>
+<div id="cmF" class="card soft cmf"><div class="hl"></div><div class="in"></div><img id="cmI" class="cmi" alt=""><div id="cmN" class="cnd"></div></div>
+
+</div>
+
+<!-- Quick settings. The rows are built from SET in the script. -->
+<div id="page-settings" class="page">
+<div class="ptl"><div class="cap">Quick settings</div><div id="stH" class="hint">&nbsp;</div></div>
+<div class="tabs">
+<div id="tb-screen" class="card tab on" data-tap="tab" data-tab="screen" style="left:0"><div class="hl"></div><div class="in"></div><div class="tt"><svg class="ti" viewBox="0 0 24 24"><use xlink:href="#i-b6" width="24" height="24"/></svg>Screen</div><div class="tub gr"></div></div>
+<div id="tb-room" class="card tab" data-tap="tab" data-tab="room" style="left:228px"><div class="hl"></div><div class="in"></div><div class="tt"><svg class="ti" viewBox="0 0 24 24"><use xlink:href="#i-ho" width="24" height="24"/></svg>Room</div><div class="tub gr"></div></div>
+</div>
+<div id="sp-screen" class="spn on"></div>
+<div id="sp-room" class="spn"></div>
+</div>
+</div>
+
+<script>
+(function () {
+"use strict";
+
+/* ---- what this page shows and drives ---- */
+/* The panel this copy of the page is built for, filled in by build.py from
+   panel/variants/: its built-in layout (the home screen until Home Assistant
+   sends one; see "the layout" below), the entities its dial, settings and
+   alerts use, its storage keys, where its rows sit, and whether it has quick
+   settings or runs inside Home Assistant's own frontend (bridge). A page can
+   take its name from ?panel= and put it in its entity ids and keys
+   ("{slug}"). */
+var V = /*VARIANT*/null;
+/* Which panel this is: ?panel=<slug> on the wall, the slug an editor hands
+   the preview, or wall_panel. */
+(function () {
+  var p = window.PANEL_PREVIEW, m = /[?&]panel=([a-z0-9_]+)/.exec(location.search || ""), k,
+    slug = m ? m[1] : p && /^[a-z0-9_]+$/.test(p.slug || "") ? p.slug : "wall_panel";
+  function fill(o) { for (k in o) { if (o.hasOwnProperty(k) && typeof o[k] === "string") { o[k] = o[k].replace(/\{slug\}/g, slug); } } }
+  fill(V.ent); fill(V.keys);
+  V.slug = slug;
+})();
+var DEFAULT_LAYOUT = V.layout;
+/* The dial's fan, timer, script and steam baseline, the clock's weather and
+   timers, and the motion line come from the layout; the rest is the panel's
+   own settings, its layout sensor and the alert and pop-up lines HA writes. */
+var ENT = V.ent;
+/* Controls and alerts poll every 2 s; room readings, the weather, the look
+   and the layout change slowly. Which entities those are depends on the
+   layout (pollLists). The other settings are read when settings opens. */
+var FAST = [], SLOW = [], IS_FAST = {};
+var SKEYS = ["night", "mode", "theme", "daylight", "dayb", "nightb", "timeout", "vdim", "vlevel", "vstart", "vend", "fanlen", "auto", "vlink"];
+var POLL_TICKS = 2, SLOW_EVERY = 5, REJECTED_TICKS = 300;
+var REQ_TIMEOUT_MS = 8000, STALE_MS = 10000;
+var FORECAST_MS = 20 * 60000, FORECAST_RETRY_MS = 60000, FORECAST_HOURS = 6;
+var TOKEN_KEY = V.keys.token;
+var TAP_MIN = 30, DIAL_MIN = 60, SNAP_MIN = 5, GRAB_MIN = 7.5;
+/* Dial geometry, in the dial's own 328 px box. */
+var C = 164, R = 118, CIRC = 2 * Math.PI * R, DISC_R = 100, RING_OUT = 178;
+var XLINK = "http://www.w3.org/1999/xlink", SVGNS = "http://www.w3.org/2000/svg";
+
+var state = {}, shown = {}, attrs = {}, touched = {}, KEY = {};
+var lastOk = 0, lastFail = 0, rejected = false, inflight = 0, ticks = 0, polls = 0;
+var clockSkew = 0, skewSet = false, actedAt = 0;
+var FC = {}, DAILY = {};
+var press = null, drag = null, lastTouch = 0, mouseDown = false;
+/* A larger display: landscape or not, the home page on show (of
+   pageCount), and the settings whose value is worked out (VIRT). */
+var land = false, homePage = 0, pageCount = 1, swipe = null, VIRT = {}, lastUse = 0;
+
+/* A layout editor can run the page in a frame as a preview. The editor
+   sets window.PANEL_PREVIEW before this script: the address to send
+   Home Assistant requests to in place of /api/ (no token needed) and the
+   layout to show. A preview saves nothing and never reloads itself. */
+var PREVIEW = window.PANEL_PREVIEW && typeof window.PANEL_PREVIEW === "object" ? window.PANEL_PREVIEW : null;
+var API = PREVIEW && typeof PREVIEW.api === "string" ? PREVIEW.api.replace(/\/?$/, "/") : "/api/";
+/* Inside Home Assistant's own frontend (a dashboard view showing the page
+   in a frame) the page borrows that frontend's live
+   connection: states, service calls and history go through its hass object,
+   so there is no token and nothing to poll over the network. */
+var BRIDGE = !!(V.bridge && !PREVIEW && window.parent && window.parent !== window);
+function hassOf() {
+  try {
+    var el = window.parent.document.querySelector("home-assistant");
+    return el && el.hass && el.hass.states ? el.hass : null;
+  } catch (e) { return null; }
+}
+var BRIDGE_HOLD_MS = 2000;
+
+function $(id) { return document.getElementById(id); }
+function now() { return new Date().getTime(); }
+function pad(n) { return n < 10 ? "0" + n : String(n); }
+
+/* Write to the DOM only when something changed: this GPU is slow to repaint. */
+function put(id, html, cls) {
+  var key = html + "|" + cls, el = $(id);
+  if (shown[id] === key) { return; }
+  shown[id] = key;
+  if (html !== null) { el.innerHTML = html; }
+  if (cls !== null) { el.className = cls; }
+}
+function setAttr(el, name, val) {
+  var k = el.id + "|" + name;
+  if (attrs[k] === val) { return; }
+  attrs[k] = val;
+  el.setAttribute(name, val);
+}
+function useIcon(id, name) {
+  var k = id + "|href";
+  if (attrs[k] === name) { return; }
+  attrs[k] = name;
+  $(id).setAttributeNS(XLINK, "xlink:href", "#i-" + name);
+}
+
+/* ---- token ---- */
+/* This page's address with a throwaway query, which skips the 31 day cache
+   on /local/, keeping the panel it is for. */
+function freshUrl(q) {
+  var m = /[?&](panel=[a-z0-9_]+)/.exec(location.search || "");
+  return location.pathname + "?" + (m ? m[1] + "&" : "") + q + "=" + now();
+}
+function readToken() {
+  var m = /[#&]token=([^&]+)/.exec(location.hash || ""), t = null;
+  try {
+    if (m) {
+      localStorage.setItem(TOKEN_KEY, decodeURIComponent(m[1]));
+      /* Drop the token from the address and from this tab's history. */
+      location.replace(freshUrl("b"));
+      return null;
+    }
+    t = localStorage.getItem(TOKEN_KEY);
+  } catch (e) { t = null; }
+  return t;
+}
+var TOKEN = PREVIEW || BRIDGE ? null : readToken();
+/* Opening #token= on the page already showing only changes the hash. */
+if (!PREVIEW && !BRIDGE) {
+  window.addEventListener("hashchange", function () {
+    if (/[#&]token=/.test(location.hash)) { readToken(); }
+  }, false);
+}
+/* Nothing to send without a token that Home Assistant accepts (a preview
+   needs none). */
+function locked() { return BRIDGE ? !hassOf() : (!(TOKEN || PREVIEW) || rejected); }
+
+/* ---- HTTP ---- */
+/* A background request (the forecast) never holds up the 2 s poll. */
+function xhr(method, path, body, cb, background) {
+  var r = new XMLHttpRequest(), done = false, own = background ? 0 : 1;
+  var timer = setTimeout(function () {
+    if (!done) { done = true; inflight -= own; r.abort(); cb(0, null); }
+  }, REQ_TIMEOUT_MS);
+  inflight += own;
+  r.open(method, path, true);
+  if (!PREVIEW) { r.setRequestHeader("Authorization", "Bearer " + TOKEN); }
+  r.setRequestHeader("Content-Type", "application/json");
+  r.onreadystatechange = function () {
+    if (r.readyState !== 4 || done) { return; }
+    done = true; inflight -= own; clearTimeout(timer);
+    /* The Date header has whole seconds: follow it only past 1.5 s of drift. */
+    var d = Date.parse(r.getResponseHeader("Date") || "");
+    if (!isNaN(d)) {
+      d = d + 500 - now();
+      if (!skewSet || Math.abs(d - clockSkew) > 1500) { clockSkew = d; skewSet = true; }
+    }
+    cb(r.status, r.responseText);
+  };
+  r.send(body ? JSON.stringify(body) : null);
+}
+
+function fetchStates(keys) {
+  var i, sent = now();
+  if (BRIDGE) { bridgeStates(keys); return; }
+  for (i = 0; i < keys.length; i++) {
+    (function (key) {
+      xhr("GET", API + "states/" + eidOf(key), null, function (status, txt) {
+        if (status === 401) { rejected = true; paint(); return; }
+        if (status === 200 || status === 404) {
+          rejected = false; lastOk = now();
+          /* A reading sent before the last tap would undo the tap on screen. */
+          if ((IS_FAST[key] && sent < actedAt) || sent < (touched[key] || 0)) { paint(); return; }
+          if (status === 404) { state[key] = null; }
+          else { try { state[key] = JSON.parse(txt); } catch (e) { return; } }
+          if (key === "layout") { takeLayout(); }
+        } else {
+          lastFail = now();
+        }
+        paint();
+      });
+    })(keys[i]);
+  }
+}
+
+/* The frontend's states, in place of the 2 s poll. A key just tapped keeps
+   what the tap showed until HA has had time to answer. */
+function bridgeStates(keys) {
+  var h = hassOf(), i, k, t = now();
+  if (!h) { lastFail = t; paint(); return; }
+  for (i = 0; i < keys.length; i++) {
+    k = keys[i];
+    if ((IS_FAST[k] && t - actedAt < BRIDGE_HOLD_MS) || t - (touched[k] || 0) < BRIDGE_HOLD_MS) { continue; }
+    state[k] = h.states[eidOf(k)] || null;
+    if (k === "layout") { takeLayout(); }
+  }
+  rejected = false; lastOk = t;
+  paint();
+}
+
+/* quiet: a settings change; settings re-reads its own entities. */
+function call(domain, service, data, quiet) {
+  if (BRIDGE) {
+    if (hassOf()) { hassOf().callService(domain, service, data).then(null, function () { lastFail = now(); }); }
+    return;
+  }
+  xhr("POST", API + "services/" + domain + "/" + service, data, function (status) {
+    if (status === 401) { rejected = true; }
+    if (!quiet) { setTimeout(function () { fetchStates(FAST); }, 700); }
+  });
+}
+
+/* type "hourly" or "daily" for weather entity e; cb gets the list, or null
+   on any failure. */
+function getForecast(type, e, cb) {
+  var h = BRIDGE ? hassOf() : null;
+  if (BRIDGE) {
+    if (!h || !h.callWS) { cb(null); return; }
+    h.callWS({ type: "call_service", domain: "weather", service: "get_forecasts",
+               service_data: { entity_id: e, type: type }, return_response: true }).then(function (r) {
+      var list = null;
+      try { list = r.response[e].forecast; } catch (x) { list = null; }
+      cb(list && list.length ? list : null);
+    }, function () { cb(null); });
+    return;
+  }
+  xhr("POST", API + "services/weather/get_forecasts?return_response",
+      { entity_id: e, type: type }, function (status, txt) {
+    var list = null;
+    if (status === 401) { rejected = true; }
+    if (status === 200) {
+      try { list = JSON.parse(txt).service_response[e].forecast; } catch (x) { list = null; }
+    }
+    cb(list && list.length ? list : null);
+  }, true);
+}
+
+/* The hourly forecast and the daily one, per weather entity. */
+function fcOf(e) { return FC[e] || (FC[e] = { list: null, due: 0, busy: false }); }
+function dailyOf(e) { return DAILY[e] || (DAILY[e] = { list: null, at: 0, busy: false }); }
+function fetchForecast(e) {
+  var f = fcOf(e);
+  f.busy = true;
+  getForecast("hourly", e, function (list) {
+    f.busy = false;
+    if (list) { f.list = list; f.due = now() + FORECAST_MS; }
+    else { f.due = now() + FORECAST_RETRY_MS; }
+    if (page === "weather" && detail.entity === e) { drawHourly(); }
+    paint();
+  });
+}
+
+/* ---- reading states ---- */
+/* Most entities are read under their entity id; the dial's and the
+   settings' under the names in ENT, whichever part of the page shows them. */
+function keyOf(eid) { return KEY[eid] || eid; }
+function eidOf(key) { return ENT.hasOwnProperty(key) ? ENT[key] : key; }
+function st(key) { return state[key] ? state[key].state : null; }
+function num(key) { var f = parseFloat(st(key)); return isNaN(f) ? null : f; }
+function attr(key, name) { return state[key] && state[key].attributes ? state[key].attributes[name] : null; }
+
+/* HA timestamps have six-digit fractions, which this WebKit cannot parse. */
+function parseIso(s) {
+  var m = /^(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)(?:\.\d+)?(Z|([+-])(\d\d):?(\d\d))?$/.exec(s || "");
+  if (!m) { return null; }
+  var t = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
+  if (m[8]) { t -= (m[8] === "-" ? -1 : 1) * (+m[9] * 60 + +m[10]) * 60000; }
+  return t;
+}
+/* Timer durations come as "H:MM:SS". */
+function minutesOf(hms) {
+  var p = String(hms || "").split(":");
+  if (p.length !== 3) { return null; }
+  return +p[0] * 60 + +p[1] + +p[2] / 60;
+}
+function clock(ms) {
+  var s = Math.ceil(ms / 1000), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60);
+  return (h ? h + ":" + pad(m) : String(m)) + ":" + pad(s % 60);
+}
+function unitOf(u) { u = u || ""; return u.charAt(0) === "°" ? u.substring(1) : u; }
+function deg(v, u) { return v === null || isNaN(v) ? "--" : Math.round(v) + "&deg;<small>" + unitOf(u) + "</small>"; }
+
+/* What the fan is doing right now, taps included. */
+function fanView() {
+  var on = st("fan") === "on", steam = num("steam"), tm = state.timer, v;
+  v = { known: !!state.fan, on: on, steam: on && steam !== null && steam > 0, left: null, dur: null };
+  if (on && tm && tm.state === "active" && tm.attributes) {
+    var end = parseIso(tm.attributes.finishes_at);
+    if (end !== null) { v.left = Math.max(0, end - (now() + clockSkew)); }
+    v.dur = minutesOf(tm.attributes.duration);
+  }
+  return v;
+}
+
+function linkView() {
+  var hb;
+  if (BRIDGE) {
+    hb = hassOf();
+    if (!hb) { return lastFail ? { cls: "bad", text: "No link", msg: "No link to Home Assistant", icon: "wo" } : { cls: "", text: "Connecting" }; }
+    return hb.connected === false ? { cls: "bad", text: "No link", stale: true } : { cls: "ok", text: "Connected" };
+  }
+  if (!TOKEN && !PREVIEW) { return { cls: "bad", text: "No token", msg: "No panel token loaded", icon: "al" }; }
+  if (rejected) { return { cls: "bad", text: "Token rejected", msg: "Panel token rejected", icon: "al" }; }
+  if (!lastOk) {
+    return lastFail ? { cls: "bad", text: "No link", msg: "No link to Home Assistant", icon: "wo" }
+                    : { cls: "", text: "Connecting" };
+  }
+  if (now() - lastOk > STALE_MS) { return { cls: "bad", text: "No link", stale: true }; }
+  return { cls: "ok", text: "Connected" };
+}
+
+/* ---- painting ---- */
+var arcEl, glowEl, knobEl, knobGEl;
+
+function drawDial(frac, lit) {
+  frac = Math.max(0, Math.min(1, frac));
+  var len = (frac * CIRC).toFixed(1) + " 1000", a = frac * 2 * Math.PI;
+  var vis = frac > 0.001 ? "visible" : "hidden";
+  setAttr(arcEl, "stroke-dasharray", len); setAttr(arcEl, "visibility", vis);
+  /* No glows at night. */
+  setAttr(glowEl, "stroke-dasharray", len); setAttr(glowEl, "visibility", look.night ? "hidden" : vis);
+  var x = (C + R * Math.sin(a)).toFixed(1), y = (C - R * Math.cos(a)).toFixed(1);
+  setAttr(knobEl, "cx", x); setAttr(knobEl, "cy", y);
+  setAttr(knobGEl, "cx", x); setAttr(knobGEl, "cy", y);
+  /* By light the knob is white in a ring of the theme, unlit a grey bead. */
+  setAttr(knobEl, "fill", lit ? lt("#fff", ink()) : (look.night ? "#262e3a" : lt("#c5cedb", "#3d4a5d")));
+  setAttr(knobEl, "stroke", lt(lit ? look.c[1] : "#fff", "#0a0f17"));
+  setAttr(knobGEl, "visibility", lit && !look.night ? "visible" : "hidden");
+}
+
+function paintDial(v, link) {
+  var big, sub = "", subCls = "sub", frac = 0, lit = false, msg = link.msg || "", bigCls = "big";
+  /* Motion only while readings are live. */
+  var live = v.on && link.cls === "ok";
+  if (drag) {
+    frac = drag.min / DIAL_MIN; lit = drag.min > 0;
+    big = drag.min ? drag.min + "<small>min</small>" : "Off";
+    sub = drag.min ? "Let go to start" : (v.on ? "Let go to stop" : "Drag to set");
+    msg = "";
+  } else if (msg) {
+    big = "--";
+  } else if (!v.known) {
+    big = "--"; sub = "Connecting";
+  } else {
+    if (v.on && v.left !== null) {
+      big = clock(v.left); lit = true;
+          /* The arc moves in 6 s steps. */
+      frac = Math.ceil(v.left / 6000) / 600;
+      if (big.length > 5) { bigCls += " long"; }
+      if (v.steam) { sub = "left, or until dry"; subCls = "sub dry"; } else { sub = "left"; }
+    } else if (v.on) {
+      big = "On"; sub = "Tap to stop"; lit = true;
+    } else {
+      big = "Off"; sub = "Tap for " + tapMin() + " min";
+    }
+    if (link.stale) { bigCls += " dim"; sub = "No link"; subCls = "sub warn"; }
+  }
+  drawDial(frac, lit);
+  put("big", big, bigCls);
+  put("sub", sub, subCls);
+  put("msg", msg, null);
+  put("fan", null, "disc" + (v.on || (drag && drag.min) ? " on" : "") + (msg ? " m" : ""));
+  useIcon("fanU", msg ? link.icon : (v.on ? "fan" : "fx"));
+  put("fanIc", null, "fanic" + (live ? " spin" : ""));
+  put("halo", null, live && !look.night ? "on" : "");
+}
+
+/* A tap on the dial runs the fan for HA's default length. */
+function tapMin() {
+  var m = num("fanlen");
+  return m !== null && m >= 1 ? Math.round(m) : TAP_MIN;
+}
+
+/* 12 hour clock, "10:12" with a small "PM", and the date under it. */
+function paintClock() {
+  var d = new Date(now() + clockSkew), h = d.getHours();
+  put("clk", (h % 12 || 12) + ":" + pad(d.getMinutes()) + "<small>" + (h < 12 ? "AM" : "PM") + "</small>", null);
+  put("dte", dateLine(d), null);
+}
+
+/* The clock hero: the time large, the date, the weather now and any timers
+   set by voice (a View Assist sensor's "timers" attribute). */
+function paintClockHero(link) {
+  var d = new Date(now() + clockSkew), h = d.getHours(), w = ENT.weather ? state.weather : null;
+  var a = w && w.attributes, t, tm, i, x, left, out = [], nm;
+  put("chT", (h % 12 || 12) + ":" + pad(d.getMinutes()) + "<small>" + (h < 12 ? "AM" : "PM") + "</small>", null);
+  put("chD", dateLine(d), null);
+  if (a) {
+    t = parseFloat(a.temperature);
+    put("chWt", deg(isNaN(t) ? null : t, a.temperature_unit), null);
+    put("chWc", WX[w.state] ? WX[w.state][1] : "&nbsp;", null);
+    useIcon("chWu", wxIcon(w.state, h));
+    setAttr($("chWu"), "fill", wxFill(wxIcon(w.state, h)));
+  }
+  put("chW", null, "chw" + (a ? "" : " gone"));
+  tm = ENT.timers ? attr("timers", "timers") : null;
+  /* The soonest three running timers. A ringing one has View Assist's own
+     screen; one more than an hour off (an alarm, a reminder) shows when. */
+  for (i = 0; isArr(tm) && i < tm.length; i++) {
+    x = tm[i] || {};
+    if (x.status && x.status !== "running") { continue; }
+    left = timerLeft(x);
+    if (left === null || left <= 0) { continue; }
+    nm = textOf(x.name, "") || textOf(x.friendly_name, "") || (x.timer_class === "alarm" ? "Alarm" : x.timer_class === "reminder" ? "Reminder" : "Timer");
+    out.push({ n: nm, left: left, at: left > HOUR_MS && x.expiry ? textOf(x.expiry.time, "") : "" });
+  }
+  out.sort(function (p, q) { return p.left - q.left; });
+  
+  for (i = 0; i < out.length; i++) {
+    out[i] = '<div class="ctm"><span>' + esc(out[i].n) + '</span><b>' + (out[i].at ? esc(out[i].at) : clock(out[i].left)) + '</b></div>';
+  }
+  put("chM", out.slice(0, 3).join(""), "chm" + (out.length ? "" : " gone"));
+  put("chL", "<i></i>" + esc(link.text), "chl link " + link.cls);
+}
+/* Milliseconds left on a View Assist timer, or null when it says nothing. */
+function timerLeft(x) {
+  var e = x.expires || x.expiry || x.finishes_at || x.end, n;
+  if (e && typeof e === "object") { e = e.timestamp || e.time || e.datetime || null; }
+  if (typeof e === "number") { return e * (e < 1e12 ? 1000 : 1) - (now() + clockSkew); }
+  if (typeof e === "string") { n = parseIso(e); return n === null ? null : n - (now() + clockSkew); }
+  return null;
+}
+
+/* The humidity status line of card c, [text, highlighted]; home and its
+   page share it. */
+function humStatus(v, c) {
+  var h = num(c.key), rise = c.riseKey ? num(c.riseKey) : null, r = rise === null ? null : Math.round(rise);
+  if (v.steam) { return ["Steam, " + (r === null ? "drying" : (r >= 0 ? "+" : "") + r), true]; }
+  if (r === null) { return [h === null ? "" : (h >= 70 ? "Humid" : (h < 30 ? "Dry" : "Comfortable")), false]; }
+  if (r === 0) { return ["About usual", false]; }
+  if (r > 0) { return [r + " over usual", r >= 5]; }
+  return [(-r) + " under usual", false];
+}
+function tempWord(t, unit) {
+  if (t === null) { return ""; }
+  var f = /C/.test(unit) ? t * 9 / 5 + 32 : t;
+  return f < 62 ? "Chilly" : (f < 68 ? "Cool" : (f <= 78 ? "Comfortable" : (f <= 84 ? "Warm" : "Hot")));
+}
+
+var WX = {
+  "sunny": ["su", "Sunny"],
+  "clear-night": ["ni", "Clear"],
+  "partlycloudy": ["pc", "Partly cloudy"],
+  "cloudy": ["cl", "Cloudy"],
+  "rainy": ["ra", "Rain"],
+  "pouring": ["po", "Heavy rain"],
+  "snowy": ["sn", "Snow"],
+  "snowy-rainy": ["sr", "Sleet"],
+  "fog": ["fg", "Fog"],
+  "hail": ["ha", "Hail"],
+  "lightning": ["li", "Lightning"],
+  "lightning-rainy": ["lr", "Storms"],
+  "windy": ["wi", "Windy"],
+  "windy-variant": ["wv", "Windy and cloudy"],
+  "exceptional": ["al", "Severe weather"]
+};
+function wxIcon(cond, hour) {
+  var w = WX[cond], night = hour >= 20 || hour < 6;
+  if (!w) { return "cl"; }
+  if (night && cond === "partlycloudy") { return "pn"; }
+  if (night && cond === "sunny") { return "ni"; }
+  return w[0];
+}
+var COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+var DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/* "6 AM", and "6:05 AM" with minutes. */
+function hr(d, mins) {
+  var h = d.getHours();
+  return (h % 12 || 12) + (mins ? ":" + pad(d.getMinutes()) : "") + (h < 12 ? " AM" : " PM");
+}
+function wind(a) {
+  if (a.wind_speed === undefined || a.wind_speed === null) { return ""; }
+  return Math.round(a.wind_speed) + " " + (a.wind_speed_unit || "") +
+    (a.wind_bearing !== undefined && a.wind_bearing !== null ? " " + COMPASS[Math.round(a.wind_bearing / 45) % 8] : "");
+}
+function dateLine(d) { return DAYS[d.getDay()] + ", " + MONTHS[d.getMonth()] + " " + d.getDate(); }
+
+/* ---- the layout ---- */
+/* Home Assistant can keep this panel's layout in a sensor (ent.layout):
+   its state is the revision, attributes.layout the layout, published as a
+   retained MQTT message (docs/layout.md). At start the page
+   shows the layout it kept from last time, or its built-in one, so it
+   never waits on the network; the slow poll brings in a new revision, and
+   only then are the rows rebuilt. What the page cannot show it leaves out:
+   a row of an unknown type, a row that does not fit, a layout that does not
+   check out. */
+var LAYOUT_KEY = V.keys.layout, ROW_TOP = V.rowTop, ROW_END = V.rowEnd, ROW_GAP = 12;
+var ROW_H = { fan_presets: 68, status: 56, sensors: 104, weather: 176, tiles: 68, camera: 252 };
+var KINDS = { temperature: 1, humidity: 1, sensor: 1 };
+/* What a tap may do, by domain. */
+var TOGGLE = { light: 1, "switch": 1, fan: 1, input_boolean: 1 };
+var RUN = { script: "turn_on", scene: "turn_on", button: "press", input_button: "press" };
+/* Icon names in a layout, to the page's icon ids; build.py fills this in. */
+var PALETTE = /*PALETTE*/{};
+var homeRows = [], homeCards = [], wxEnts = [], layRev = null, badRev = null, layJson = "", heroKind = "fan_dial", layNow = null;
+
+function ownKey(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
+function isArr(x) { return Object.prototype.toString.call(x) === "[object Array]"; }
+/* An entity id (of one domain, if given), or null. */
+function entity(x, dom) {
+  return typeof x === "string" && /^[a-z0-9_]+\.[a-z0-9_]+$/.test(x) && (!dom || domOf(x) === dom) ? x : null;
+}
+function domOf(eid) { return eid.split(".")[0]; }
+function textOf(x, dflt) { return typeof x === "string" && x ? x : dflt; }
+/* An icon the page does not carry shows as a plain ring. */
+function iconOf(x) { return typeof x === "string" && ownKey(PALETTE, x) ? PALETTE[x] : "nu"; }
+
+/* The layout, checked and with each row's top, or null. */
+function checkLayout(raw) {
+  var h = raw && raw.hero, out, y = ROW_TOP, i, r;
+  if (!h || !isArr(raw.rows)) { return null; }
+  if (h.type === "fan_dial") {
+    out = {
+      kind: "fan_dial",
+      hero: { fan: entity(h.fan, "fan"), timer: entity(h.timer, "timer"), script: entity(h.script, "script"),
+              steam: entity(h.steam, "input_number"), weather: null, timers: null },
+      motion: raw.header ? entity(raw.header.motion, "binary_sensor") : null,
+      rows: []
+    };
+    if (!out.hero.fan || !out.hero.timer || !out.hero.script ||
+        (h.steam !== null && h.steam !== undefined && !out.hero.steam)) { return null; }
+  } else if (h.type === "clock") {
+    /* The clock: time and date, the weather now (optional) and, from a View
+       Assist sensor, the timers set by voice (optional). */
+    out = {
+      kind: "clock",
+      hero: { fan: null, timer: null, script: null, steam: null,
+              weather: entity(h.weather, "weather"), timers: entity(h.timers, "sensor") },
+      motion: raw.header ? entity(raw.header.motion, "binary_sensor") : null,
+      rows: []
+    };
+  } else {
+    return null;
+  }
+  for (i = 0; i < raw.rows.length; i++) {
+    r = checkRow(raw.rows[i]);
+    /* A row that does not fit is left out; a shorter one after it may fit. */
+    if (!r || y + ROW_H[r.type] > ROW_END) { continue; }
+    r.y = y;
+    y += ROW_H[r.type] + ROW_GAP;
+    out.rows.push(r);
+  }
+  
+  return out.rows.length ? out : null;
+}
+function checkRow(r) {
+  var t = r && r.type, o, a, i, m, c, e;
+  if (t === "fan_presets") {
+    o = { type: t, minutes: [] };
+    a = isArr(r.minutes) ? r.minutes : [];
+    for (i = 0; i < a.length && o.minutes.length < 3; i++) {
+      m = a[i];
+      if (typeof m === "number" && m % 1 === 0 && m >= 1 && m <= 120 && o.minutes.indexOf(m) < 0) { o.minutes.push(m); }
+    }
+    return o.minutes.length ? o : null;
+  }
+  if (t === "status") {
+    e = entity(r.entity);
+    return e ? { type: t, entity: e, label: textOf(r.label, ""), icon: iconOf(r.icon),
+                 tap: r.tap === "toggle" && ownKey(TOGGLE, domOf(e)) ? "toggle" : "none" } : null;
+  }
+  if (t === "sensors") {
+    if (!isArr(r.cards) || r.cards.length < 2) { return null; }
+    o = { type: t, cards: [] };
+    for (i = 0; i < 2; i++) {
+      c = r.cards[i];
+      e = c && entity(c.entity);
+      if (!e || !ownKey(KINDS, c.kind)) { return null; }
+      m = c.kind === "humidity";
+      o.cards.push({ kind: c.kind, entity: e, label: textOf(c.label, ""), icon: iconOf(c.icon),
+                     baseline: m ? entity(c.baseline) : null, rise: m ? entity(c.rise) : null });
+    }
+    return o;
+  }
+  if (t === "weather") {
+    e = entity(r.entity, "weather");
+    return e ? { type: t, entity: e, label: textOf(r.label, "Outside") } : null;
+  }
+  if (t === "camera") {
+    e = entity(r.entity, "camera");
+    return e ? { type: t, entity: e, label: textOf(r.label, "") } : null;
+  }
+  if (t === "tiles") {
+    o = { type: t, tiles: [] };
+    a = isArr(r.tiles) ? r.tiles : [];
+    for (i = 0; i < a.length && o.tiles.length < 3; i++) {
+      c = a[i];
+      e = c && entity(c.entity);
+      if (!e) { continue; }
+      m = domOf(e);
+      /* A tap the entity's domain does not allow only shows the state. */
+      o.tiles.push({ entity: e, label: textOf(c.label, ""), icon: iconOf(c.icon),
+                     tap: c.tap === "toggle" && ownKey(TOGGLE, m) ? "toggle" : (c.tap === "run" && ownKey(RUN, m) ? "run" : "none") });
+    }
+    return o.tiles.length ? o : null;
+  }
+  return null;
+}
+
+/* At start: the layout kept from last time, else the built-in one. */
+function startLayout() {
+  var c = null, lay = null;
+  if (PREVIEW) { return checkLayout(PREVIEW.layout) || checkLayout(DEFAULT_LAYOUT); }
+  try { c = JSON.parse(localStorage.getItem(LAYOUT_KEY) || "null"); } catch (e) { c = null; }
+  lay = c && typeof c.rev === "number" ? checkLayout(c.layout) : null;
+  if (lay) { layRev = String(c.rev); }
+  return lay || checkLayout(DEFAULT_LAYOUT);
+}
+/* A new revision from Home Assistant: show it if it checks out and keep it
+   for the next start. A bad one is left alone until the next revision. */
+function takeLayout() {
+  var s = state.layout, rev = s ? s.state : null, lay;
+  if (PREVIEW || !/^\d+$/.test(rev || "") || rev === layRev || rev === badRev) { return; }
+  lay = s.attributes ? checkLayout(s.attributes.layout) : null;
+  if (!lay) { badRev = rev; return; }
+  layRev = rev;
+  try { localStorage.setItem(LAYOUT_KEY, JSON.stringify({ rev: +rev, layout: s.attributes.layout })); } catch (e) { /* shown, not kept */ }
+  useLayout(lay);
+}
+/* Show a checked layout; the same one again changes nothing. */
+function useLayout(lay) {
+  var j = JSON.stringify(lay), k;
+  if (j === layJson) { return; }
+  layJson = j; layNow = lay;
+  /* A different fan or timer: forget what the old one said. */
+  for (k in lay.hero) {
+    if (ownKey(lay.hero, k) && ENT[k] !== lay.hero[k]) { delete state[k]; ENT[k] = lay.hero[k]; }
+  }
+  if (ENT.motion !== lay.motion) { delete state.motion; ENT.motion = lay.motion; }
+  heroKind = lay.kind;
+  lookKey = "";
+  KEY = {};
+  for (k in ENT) { if (ownKey(ENT, k) && ENT[k]) { KEY[ENT[k]] = k; } }
+  buildRows(lay.rows, lay.pages);
+  
+  pollLists();
+  /* New rows read their entities now, not at the next slow poll (at start
+     the first poll reads everything). */
+  if (lastOk && !locked()) { fetchStates(FAST.concat(SLOW).filter(function (k) { return !ownKey(state, k); })); }
+}
+
+/* What to poll: the dial, the alert and the rows' switches fast; the rows'
+   readings, the look and the layout slowly. */
+function pollLists() {
+  var i, j, r, c;
+  function add(list, k) { if (k && FAST.indexOf(k) < 0 && SLOW.indexOf(k) < 0) { list.push(k); } }
+  FAST = []; SLOW = []; IS_FAST = {}; wxEnts = [];
+  add(FAST, ENT.fan && "fan"); add(FAST, ENT.timer && "timer"); add(FAST, ENT.steam && "steam");
+  for (i = 0; i < homeRows.length; i++) {
+    r = homeRows[i];
+    if (r.type === "status") { add(FAST, r.key); }
+    for (j = 0; r.type === "tiles" && j < r.tiles.length; j++) {
+      if (r.tiles[j].tap !== "run") { add(FAST, r.tiles[j].key); }
+    }
+  }
+  add(FAST, ENT.motion && "motion"); add(FAST, ENT.alert && "alert"); add(FAST, ENT.popup && "popup");
+  add(FAST, ENT.timers && "timers");
+  for (i = 0; i < homeRows.length; i++) {
+    r = homeRows[i];
+    for (j = 0; r.type === "sensors" && j < 2; j++) {
+      c = r.cards[j];
+      add(SLOW, c.key); add(SLOW, c.riseKey);
+    }
+    for (j = 0; r.type === "tiles" && j < r.tiles.length; j++) { add(SLOW, r.tiles[j].key); }
+    if (r.type === "weather") {
+      add(SLOW, r.key);
+      if (wxEnts.indexOf(r.entity) < 0) { wxEnts.push(r.entity); }
+    }
+    /* A camera's picture address carries a token that changes every few
+       minutes, so its state is read with the slow readings. */
+    if (r.type === "camera") { add(SLOW, r.key); }
+  }
+  add(SLOW, ENT.weather && "weather");
+  if (ENT.weather && wxEnts.indexOf(ENT.weather) < 0) { wxEnts.push(ENT.weather); }
+  add(SLOW, ENT.night && "night"); add(SLOW, ENT.theme && "theme"); add(SLOW, ENT.daylight && "daylight");
+  add(SLOW, ENT.fanlen && "fanlen"); add(SLOW, ENT.sun && "sun");
+  if (!PREVIEW) { add(SLOW, "layout"); }
+  for (i = 0; i < FAST.length; i++) { IS_FAST[FAST[i]] = 1; }
+}
+
+/* n cards across a row with 12 px between them: 141, 142 and 141 px for
+   three, as the quick run buttons always were. */
+function spot(i, n) {
+  var a = Math.round(i * (448 + ROW_GAP) / n), b = Math.round((i + 1) * (448 + ROW_GAP) / n) - ROW_GAP;
+  return "left:" + a + "px;width:" + (b - a) + "px";
+}
+function buildPresets(r) {
+  var h = "", j, m;
+  for (j = 0; j < r.minutes.length; j++) {
+    m = r.minutes[j];
+    h += box(r.id + "b" + j, "qb", ' data-tap="run" data-min="' + m + '"', spot(j, r.minutes.length),
+      '<div class="qt"><b>' + m + '</b>min</div>');
+  }
+  return h;
+}
+function buildStatus(r) {
+  return box(r.id + "c", "van", r.tap === "toggle" ? ' data-tap="toggle" data-entity="' + r.entity + '"' : "", "",
+    ph(r.icon, "vic") + '<div class="vw"><div id="' + r.id + 's" class="vs off">--</div><div class="vl">' + esc(r.label) + '</div></div>');
+}
+function buildSensors(r) {
+  var h = "", j, c, p;
+  /* The right card goes first, so a lit card's glow tucks under its
+     neighbour as it always has. */
+  for (j = 1; j >= 0; j--) {
+    c = r.cards[j]; p = r.id + "c" + j;
+    c.riseKey = c.rise ? keyOf(c.rise) : null;
+    homeCards.push(c);
+    h += box(p, "soft cl", ' data-tap="page" data-page="' + (c.kind === "humidity" ? "humidity" : "temp") +
+      '" data-card="' + (homeCards.length - 1) + '"', spot(j, 2),
+      ph(c.icon, "cic") + '<div class="cap">' + esc(c.label) + '</div><div id="' + p + 'v" class="val' +
+      (c.kind === "humidity" ? "" : " t") + '">--</div><div id="' + p + 's" class="st"></div>');
+  }
+  return h;
+}
+function buildWeather(r) {
+  var p = r.id;
+  homeCards.push(r);
+  return box(p + "c", "soft nd wx", ' data-tap="page" data-page="weather" data-card="' + (homeCards.length - 1) + '"', "",
+    '<div class="wnow"><div id="' + p + 'w" class="wt">--</div><div class="wd"><div class="cap">' + esc(r.label) +
+    '</div><div id="' + p + 'n" class="wc">&nbsp;</div><div id="' + p + 'd" class="wdd">&nbsp;</div></div></div>' +
+    ph("cl", "wic", p + "u") + '<div class="fcl"><i></i><span class="cap">Next hours</span></div>' +
+    '<div id="' + p + 'f" class="fc none"><div id="' + p + 'x" class="fcn">Forecast unavailable</div></div>');
+}
+function buildTiles(r) {
+  var h = "", j, t, id;
+  for (j = 0; j < r.tiles.length; j++) {
+    t = r.tiles[j]; id = r.id + "t" + j;
+    h += box(id, "qb", t.tap === "none" ? "" : ' data-tap="' + (t.tap === "run" ? "trigger" : "toggle") + '" data-entity="' + t.entity + '"',
+      spot(j, r.tiles.length), t.tap === "run" ? ph(t.icon, "tli top") + '<div class="tln one">' + esc(t.label) + '</div>' :
+      '<div class="tln">' + ph(t.icon, "tli") + esc(t.label) + '</div><div id="' + id + 's" class="tls">--</div>');
+  }
+  return h;
+}
+/* A camera: a still that refreshes every CAM_MS while home shows; a tap opens
+   the live picture. */
+function buildCamera(r) {
+  homeCards.push(r);
+  return box(r.id + "c", "soft cam", ' data-tap="page" data-page="camera" data-card="' + (homeCards.length - 1) + '"', "",
+    '<img id="' + r.id + 'i" class="cimg" alt="">' + (r.label ? '<div class="clb">' + esc(r.label) + '</div>' : '') +
+    '<div id="' + r.id + 'x" class="cnd">&nbsp;</div>');
+}
+var BUILD = { fan_presets: buildPresets, status: buildStatus, sensors: buildSensors, weather: buildWeather, tiles: buildTiles, camera: buildCamera };
+
+/* The home rows from scratch; row i's elements have ids starting "L<i>".
+   With more pages each page's rows (or its cameras) get a box of their own,
+   and row ids run on across the pages. */
+function buildRows(list, pages) {
+  var h = "", i, j, r, el = $("rows"), p, pgs = [{ type: "rows", rows: list }].concat(pages || []), n = 0;
+  /* A finger on a row that is about to go lets go of it. */
+  if (press && !press.dial) { press = null; }
+  homeRows = []; homeCards = []; camDue = {};
+  pageCount = pgs.length;
+  
+  if (homePage >= pageCount) { homePage = 0; }
+  for (p = 0; p < pgs.length; p++) {
+    if (pgs.length > 1) { h += '<div id="pg' + p + '" class="pg' + (p === homePage ? " on" : "") + '">'; }
+    
+    for (i = 0; pgs[p].rows && i < pgs[p].rows.length; i++) {
+      r = pgs[p].rows[i];
+      r.id = "L" + n++;
+      r.pg = p;
+      r.key = r.entity ? keyOf(r.entity) : null;
+      for (j = 0; r.cards && j < r.cards.length; j++) { r.cards[j].key = keyOf(r.cards[j].entity); }
+      for (j = 0; r.tiles && j < r.tiles.length; j++) { r.tiles[j].key = keyOf(r.tiles[j].entity); }
+      homeRows.push(r);
+      h += '<div class="row" style="top:' + r.y + 'px;height:' + ROW_H[r.type] + 'px">' + BUILD[r.type](r) + '</div>';
+    }
+    if (pgs.length > 1) { h += "</div>"; }
+  }
+  forget(shown); forget(attrs);
+  el.innerHTML = h;
+  icons(el);
+  for (i = 0; i < homeRows.length; i++) {
+    if (homeRows[i].type === "weather") { cells(homeRows[i].id); }
+  }
+  
+}
+/* The diffed writes forget the old rows' elements. */
+function forget(map) {
+  var k;
+  for (k in map) { if (ownKey(map, k) && /^(L|cg|pg)\d/.test(k)) { delete map[k]; } }
+}
+/* The six forecast cells of a weather row. */
+function cells(p) {
+  var fc = $(p + "f"), i, cell;
+  for (i = 0; i < FORECAST_HOURS; i++) {
+    cell = mk("div", "fcc");
+    cell.appendChild(mk("div", "fh")).id = p + "h" + i;
+    cell.appendChild(icon("fi", p + "i" + i));
+    cell.appendChild(mk("div", "ft")).id = p + "e" + i;
+    fc.insertBefore(cell, $(p + "x"));
+  }
+}
+
+/* A status row's or a tile's entity: t the state (On or Off, Open or Closed
+   for a door and so on, a number, or Home Assistant's word), u its unit;
+   null while there is no state. */
+var BIN = {
+  door: ["Open", "Closed"], garage_door: ["Open", "Closed"], window: ["Open", "Closed"], opening: ["Open", "Closed"],
+  motion: ["Detected", "Clear"], occupancy: ["Detected", "Clear"], moisture: ["Wet", "Dry"]
+};
+function stateOf(k) {
+  var s = st(k), w, dc;
+  if (!s || s === "unknown" || s === "unavailable") { return null; }
+  if (s === "on" || s === "off") {
+    dc = attr(k, "device_class");
+    w = typeof dc === "string" && ownKey(BIN, dc) ? BIN[dc] : ["On", "Off"];
+    return { t: w[s === "on" ? 0 : 1], u: "", on: s === "on", off: s === "off" };
+  }
+  if (/^-?\d+(\.\d+)?$/.test(s)) { return { t: numText(parseFloat(s)), u: esc(attr(k, "unit_of_measurement") || ""), on: false, off: false }; }
+  return { t: esc(s.charAt(0).toUpperCase() + s.substring(1).replace(/_/g, " ")), u: "", on: false, off: false };
+}
+/* "72.1", "5.68", "1235": about three figures. */
+function numText(f) {
+  var a = Math.abs(f);
+  return String(a >= 100 ? Math.round(f) : (a >= 10 ? Math.round(f * 10) / 10 : Math.round(f * 100) / 100));
+}
+function unitAfter(u) { return u ? (u.charAt(0) === "°" || u === "%" ? "" : " ") + u : ""; }
+
+function paintPresets(r, v, link) {
+  var j, m, active;
+  for (j = 0; j < r.minutes.length; j++) {
+    m = r.minutes[j];
+    /* A steam run's timer is only a ceiling, so no button claims it. */
+    active = !drag && v.on && !v.steam && v.left !== null && v.dur !== null && Math.round(v.dur) === m;
+    put(r.id + "b" + j, null, "card qb" + (active ? " on" : "") + (link.cls === "bad" ? " dim" : ""));
+  }
+}
+function paintStatus(r) {
+  var o = stateOf(r.key), b = attr(r.key, "brightness");
+  if (!o || o.off) { put(r.id + "s", o ? o.t : "--", "vs off"); }
+  else { put(r.id + "s", "<b>" + o.t + "</b>" + (o.on && b ? "<em>|</em>" + Math.round(b / 2.55) + "% brightness" : unitAfter(o.u)), "vs"); }
+  put(r.id + "c", null, "card van" + (o && o.on ? " soft lit" : ""));
+}
+function paintSensors(r, v) {
+  var j, c, p, n, u, s;
+  for (j = 0; j < 2; j++) {
+    c = r.cards[j]; p = r.id + "c" + j; n = num(c.key); u = attr(c.key, "unit_of_measurement") || "";
+    if (c.kind === "humidity") {
+      s = humStatus(v, c);
+      put(p + "v", n === null ? "--" : Math.round(n) + "<small>%</small>", null);
+      put(p + "s", s[0], "st" + (s[1] ? " hot" : ""));
+      /* A steam run lights the humidity card: it is why the fan is on. */
+      put(p, null, "card soft cl" + (v.steam ? " on" : ""));
+    } else if (c.kind === "temperature") {
+      /* HA already converts the panel's Celsius to the house unit. */
+      put(p + "v", deg(n, u), null);
+      put(p + "s", tempWord(n, u), null);
+    } else {
+      put(p + "v", n === null ? "--" : numText(n) + "<small>" + esc(u) + "</small>", null);
+    }
+  }
+}
+function paintWeather(r) {
+  var w = state[r.key], a = w && w.attributes ? w.attributes : null, parts = [], cond, t, ic, p = r.id;
+  var fc = fcOf(r.entity).list, today = new Date();
+  put(p + "c", null, "card soft wx" + (a ? "" : " nd"));
+  if (!a) {
+    put(p + "w", "", null); put(p + "n", "Weather unavailable", null); put(p + "d", "&nbsp;", null);
+  } else {
+    cond = w.state;
+    t = parseFloat(a.temperature);
+    put(p + "w", deg(isNaN(t) ? null : t, a.temperature_unit), null);
+    put(p + "n", WX[cond] ? WX[cond][1] : "&nbsp;", null);
+    if (a.humidity !== undefined && a.humidity !== null) { parts.push(Math.round(a.humidity) + "% humidity"); }
+    if (wind(a)) { parts.push("Wind " + wind(a)); }
+    put(p + "d", parts.join(" | ") || "&nbsp;", null);
+    useIcon(p + "u", wxIcon(cond, today.getHours()));
+  }
+
+  var i, n = 0, f, when, d, h, t0 = now();
+  for (i = 0; fc && i < fc.length && n < FORECAST_HOURS; i++) {
+    f = fc[i];
+    when = parseIso(f.datetime);
+    if (when === null || when <= t0 + clockSkew) { continue; }
+    d = new Date(when);
+    h = d.getHours();
+    ic = wxIcon(f.condition, h);
+    put(p + "h" + n, hr(d), null);
+    put(p + "e" + n, isNaN(parseFloat(f.temperature)) ? "--" : Math.round(f.temperature) + "&deg;", null);
+    useIcon(p + "i" + n, ic);
+    setAttr($(p + "i" + n), "fill", wxFill(ic));
+    n++;
+  }
+  for (i = n; i < FORECAST_HOURS; i++) {
+    put(p + "h" + i, "", null); put(p + "e" + i, "", null); setAttr($(p + "i" + i), "fill", "none");
+  }
+  put(p + "f", null, n ? "fc" : "fc none");
+}
+function paintTiles(r, v, link) {
+  var j, t, id, o, on;
+  for (j = 0; j < r.tiles.length; j++) {
+    t = r.tiles[j]; id = r.id + "t" + j; o = stateOf(t.key);
+    /* A run tile lights up for a moment after its tap. */
+    on = t.tap === "run" ? now() < (held[t.entity] || 0) : !!(o && o.on);
+    if (t.tap !== "run") { put(id + "s", o ? o.t + unitAfter(o.u) : "--", null); }
+    put(id, null, "card qb" + (on ? " on" : "") + (t.tap !== "none" && link.cls === "bad" ? " dim" : ""));
+  }
+}
+/* The still under a camera row, while home shows. */
+var CAM_MS = 10000, camDue = {};
+function paintCamera(r) {
+  var s = state[r.key], a = s && s.attributes, ok = !!(s && s.state !== "unavailable" && s.state !== "unknown" && a && a.entity_picture);
+  put(r.id + "x", ok || PREVIEW ? "" : (s ? "Camera unavailable" : "--"), "cnd" + (ok || PREVIEW ? " gone" : ""));
+  if ((!ok && !PREVIEW) || page || now() < (camDue[r.id] || 0)) { return; }
+  camDue[r.id] = now() + CAM_MS;
+  $(r.id + "i").src = snapUrl(r.entity, a);
+}
+/* A still of camera eid, and its live picture (MJPEG): the addresses carry
+   the camera's own rotating token, so an <img> can load them. In the preview
+   they go through the editor's proxy, stills only. */
+function snapUrl(eid, a) {
+  var u = a && a.entity_picture;
+  if (PREVIEW) { return API + "camera_proxy/" + eid + "?t=" + now(); }
+  return u ? u + (u.indexOf("?") < 0 ? "?" : "&") + "t=" + now() : "";
+}
+function streamUrl(eid, a) {
+  if (PREVIEW || !(a && a.access_token)) { return snapUrl(eid, a); }
+  return "/api/camera_proxy_stream/" + eid + "?token=" + a.access_token;
+}
+var PAINT = { fan_presets: paintPresets, status: paintStatus, sensors: paintSensors, weather: paintWeather, tiles: paintTiles, camera: paintCamera };
+/* Whatever a layout holds, the dial, alerts and settings keep working. */
+function paintRows(v, link) {
+  var i;
+  for (i = 0; i < homeRows.length; i++) {
+    if (homeRows[i].pg !== homePage) { continue; }
+    try { PAINT[homeRows[i].type](homeRows[i], v, link); } catch (e) { if (window.console) { console.error(e); } }
+  }
+  
+}
+/* The first weather row's entity, for the outside now next to a
+   temperature; null without one. */
+function outside() {
+  var i;
+  for (i = 0; i < homeRows.length; i++) { if (homeRows[i].type === "weather") { return homeRows[i].key; } }
+  return null;
+}
+
+function paintLink(link) {
+  var m = link.cls === "ok" ? st("motion") : null;
+  put("link", null, "link " + link.cls);
+  put("linkT", link.text, null);
+  if (m === "on" || m === "off") {
+    put("motT", m === "on" ? "Occupied" : "Clear", null);
+    useIcon("motU", m === "on" ? "wk" : "ms");
+  }
+  put("mot", null, "mot" + (m === "on" ? " show occ" : (m === "off" ? " show" : "")));
+}
+
+function paint() {
+  var v = fanView(), link = linkView();
+  applyLook();
+  paintAlert();
+  if (ENT.popup) { checkPopup(); }
+  if (heroKind === "clock") { paintClockHero(link); } else { paintClock(); paintDial(v, link); }
+  paintRows(v, link);
+  
+  paintLink(link);
+  paintPage(v);
+  if (page === "settings") { paintSettings(link); }
+}
+
+/* ---- day and night, light and dark, themes ---- */
+/* HA decides when it is night (ent.night), whether
+   the day look is light (ent.daylight) and which
+   theme is on. Three looks: light by day with the switch on (the default),
+   dark by day with it off, and night, which is always dark. The page swaps
+   classes on <html> for the CSS and sets the SVG colours here. The last look
+   is kept so a reload starts in it. */
+var THEMES = {
+  Neon: ["#22d3ee", "#818cf8", "#c084fc"],
+  Ocean: ["#2dd4bf", "#0ea5e9", "#3b6cf0"],
+  Ember: ["#fbbf24", "#fb8c3c", "#f4506e"],
+  Mono: ["#8b98ab", "#c7d0dc", "#f8fafc"]
+};
+/* The same themes, deeper, to read on white. */
+var LIGHT = {
+  Neon: ["#0891b2", "#6366f1", "#7c3aed"],
+  Ocean: ["#0d9488", "#0277bd", "#1d4ed8"],
+  Ember: ["#c96a06", "#d9480f", "#db1f48"],
+  Mono: ["#64748b", "#475569", "#1e293b"]
+};
+var LOOK_KEY = V.keys.look, lookKey = "";
+var look = { theme: "Neon", night: false, day: true, light: true, c: LIGHT.Neon };
+/* Saved as "Theme|n|d": n is 1 at night, 2 light, 0 dark by day; d is the
+   light switch, 1 on and 0 off, kept apart so a look saved at night still
+   remembers it. An older "Theme|n" reads the switch from n. */
+function loadLook() {
+  try {
+    var p = (localStorage.getItem(LOOK_KEY) || "").split("|");
+    if (THEMES[p[0]]) { look.theme = p[0]; }
+    look.night = p[1] === "1";
+    look.day = p.length > 2 ? p[2] !== "0" : p[1] !== "0";
+  } catch (e) { /* private mode: start in the default look */ }
+}
+/* One value for the light look, another for the dark ones. */
+function lt(a, b) { return look.light ? a : b; }
+/* Night colours: the theme's, at 70 percent. */
+function darker(hex) {
+  var n = parseInt(hex.substring(1), 16), i, out = "#", c;
+  for (i = 16; i >= 0; i -= 8) { c = Math.round((n >> i & 255) * 0.7); out += (c < 16 ? "0" : "") + c.toString(16); }
+  return out;
+}
+/* Dots on the charts: pale on the dark looks, near black on the light one. */
+function ink() { return look.night ? "#b4bdc9" : lt("#1e293b", "#f4fbff"); }
+/* Weather icons keep their own colours: the sun amber, the rest pale; on
+   white the sun is a deeper amber and the rest slate. */
+function wxFill(ic) {
+  return ic === "su" ? (look.night ? "#b39331" : lt("#d97706", "#fcd34d")) : (look.night ? "#8a95a4" : lt("#5f6f86", "#d6e4f5"));
+}
+function stops(id, cols) {
+  var s = $(id).getElementsByTagName("stop"), i;
+  for (i = 0; i < s.length; i++) { s[i].setAttribute("stop-color", cols[i]); }
+}
+function applyLook() {
+  var th = st("theme"), n = st("night"), c, key, sn;
+  /* A panel with no night sensor of its own goes by the sun. */
+  if (n !== "on" && n !== "off" && ENT.sun) {
+    sn = st("sun");
+    if (sn === "below_horizon" || sn === "above_horizon") { n = sn === "below_horizon" ? "on" : "off"; }
+  }
+  /* Unknown means not read yet: keep what is on. An option this page does not
+     know falls back to Neon. */
+  if (th !== null && th !== "unknown" && th !== "unavailable") { look.theme = THEMES[th] ? th : "Neon"; }
+  if (n === "on" || n === "off") { look.night = n === "on"; }
+  /* Only "off" makes the day dark: unknown, unavailable or a missing switch
+     count as on, the default. Not read yet keeps what is on. */
+  if (state.hasOwnProperty("daylight")) { look.day = st("daylight") !== "off"; }
+  look.light = look.day && !look.night;
+  /* The switch is part of the key, so turning it off at night still saves. */
+  key = look.theme + "|" + (look.night ? 1 : (look.light ? 2 : 0)) + "|" + (look.day ? 1 : 0) + (heroKind === "clock" ? "|c" : "") + (land ? "|l" : "");
+  if (key === lookKey) { return; }
+  lookKey = key;
+  c = look.light ? LIGHT[look.theme] : THEMES[look.theme];
+  if (look.night) { c = c.map(darker); }
+  look.c = c;
+  document.documentElement.className = ((look.theme === "Neon" ? "" : "t-" + look.theme.toLowerCase()) +
+    (look.night ? " night" : (look.light ? " light" : "")) + (heroKind === "clock" ? " hc" : "") + (land ? " land" : "")).replace(/^ /, "");
+  stops("gi", c); stops("gl", c); stops("ga", c); stops("gf", c);
+  $("knobG").setAttribute("fill", c[0]);
+  $("dl").setAttribute("fill", look.night ? "#6f7a8b" : lt("#5e6d82", "#c3cddb"));
+  /* On white: a light grey track with a hint of the theme, a softer glow
+     under the arc, mid grey ticks. */
+  $("trk").setAttribute("stroke", lt("#e6ebf1", "#111823"));
+  $("trg").setAttribute("opacity", lt(".05", ".14"));
+  glowEl.setAttribute("opacity", lt(".13", ".2"));
+  $("tk1").setAttribute("stroke", lt("#5e6d82", "#8fa0bd"));
+  $("tk2").setAttribute("stroke", lt("#5e6d82", "#b4c2dc"));
+  $("tk1").setAttribute("stroke-opacity", look.night ? ".22" : lt(".42", ".3"));
+  $("tk2").setAttribute("stroke-opacity", look.night ? ".4" : lt(".75", ".6"));
+  if (!PREVIEW) { try { localStorage.setItem(LOOK_KEY, key.replace(/(\|c)?(\|l)?$/, "")); } catch (e) { /* not kept, fine */ } }
+  /* Charts on an open page carry the old colours. */
+  if (page === "temp" || page === "humidity") { drawHist(page); }
+  if (page === "weather") { drawHourly(); drawWeek(); }
+}
+
+/* ---- alert banner ---- */
+/* The alert text helper (ent.alert) holds "level|title|message": empty is no
+   alert, level "alarm" (red, pulsing) or "info" (calm). A new alert brings
+   the page home. A tap clears it in HA and hides it at once; one this panel
+   dismissed stays hidden even if the clear does not reach HA. */
+var alertSeen = "", alertGone = "";
+function esc(t) { return String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+function trim(t) { return String(t).replace(/^\s+|\s+$/g, ""); }
+function alertView() {
+  var s = st("alert"), p, lv, t, m, all, key;
+  if (s === null || s === "unknown" || s === "unavailable" || !trim(s)) { return null; }
+  key = s + "|" + (state.alert.last_changed || "");
+  if (key === alertGone) { return null; }
+  p = s.split("|");
+  lv = p.length > 1 ? trim(p.shift()).toLowerCase() : "info";
+  t = trim(p.shift() || ""); m = trim(p.join("|"));
+  if (!t) { t = m; m = ""; }
+  all = (t + " " + m).toLowerCase();
+  lv = lv === "alarm" ? "alarm" : "info";
+  return {
+    key: key, level: lv, title: t, msg: m,
+    icon: lv === "alarm" ? (/smoke|fire/.test(all) ? "fr" : (/water|leak/.test(all) ? "wa" : "ao"))
+                         : (/dryer/.test(all) ? "td" : "br")
+  };
+}
+/* Cut a long message at a word, so an alarm's three lines end cleanly. */
+function clip(t, n) {
+  if (t.length <= n) { return t; }
+  t = t.substring(0, n);
+  return t.substring(0, t.lastIndexOf(" ") > n / 2 ? t.lastIndexOf(" ") : n) + "\u2026";
+}
+function paintAlert() {
+  var a = alertView(), n;
+  
+  if (!a) { put("alert", null, "card alert"); return; }
+  if (a.key !== alertSeen) {
+    alertSeen = a.key;
+    if (page) { showPage(null); }
+    
+  }
+  /* A long alarm title steps down a size rather than lose its end. */
+  n = a.title.length;
+  put("alT", esc(a.title), "alt" + (n > 16 ? " s" : (n > 10 ? " m" : "")));
+  put("alM", esc(a.level === "alarm" ? clip(a.msg, 88) : a.msg), null);
+  useIcon("alU", a.icon);
+  /* Roughly how many lines the alarm's message takes, to centre the block. */
+  n = a.msg ? Math.min(3, Math.ceil(a.msg.length / 32)) : 0;
+  put("alert", null, "card alert " + a.level + " l" + n + (a.msg ? "" : " one"));
+}
+function dismissAlert() {
+  var a = alertView();
+  if (!a) { return; }
+  alertGone = a.key;
+  settle("alert", "");
+  if (!locked()) { call("input_text", "set_value", { entity_id: ENT.alert, value: "" }); }
+  paint();
+}
+
+/* ---- quick settings ---- */
+/* Rows per tab: [kind, key, caption, top, options or hint, unit or icon].
+   Options are [value, label, sub line, icon]. Every control carries
+   data-tap="set" (or "step" for the times), data-entity and data-value. */
+var SET = {
+  screen: [
+    ["seg", "mode", "Display mode", 168, [["Auto", "Auto", "Sunset to sunrise", "au"], ["Day", "Day", "", "su"], ["Night", "Night", "", "ni"]]],
+    ["tog", "daylight", "Light screen by day", 272, "Dark at night either way", "su"],
+    ["theme", "theme", "Theme", 354, [["Neon"], ["Ocean"], ["Ember"], ["Mono"]]],
+    ["seg", "dayb", "Day brightness", 482, [[40], [60], [80], [100]], "%"],
+    ["seg", "nightb", "Night brightness", 586, [[5], [15], [30], [50]], "%"],
+    ["seg", "timeout", "Screen stays on", 690, [[30, 30, "s"], [60, 1, "min"], [120, 2, "min"], [300, 5, "min"]]]
+  ],
+  room: [
+    ["tog", "vdim", "Vanity dims at night", 172, "Motion and the wall button turn it on dim", "ln"],
+    ["seg", "vlevel", "Vanity night level", 262, [[5], [10], [20], [35]], "%"],
+    ["time", "vtime", "Vanity night hours", 374],
+    ["seg", "fanlen", "Fan run length", 486, [[15], [30], [45], [60]], "min"],
+    ["tog", "auto", "Fan starts on steam", 596, "Runs by itself after a shower", "wp"],
+    ["tog", "vlink", "Vanity with the fan button", 676, "Fan on at the wall lights the vanity too", "mi"]
+  ]
+};
+var tab = "screen", rereadTimer = null, STEP_MIN = 30, REREAD_MS = 1500;
+
+/* An icon's place in built markup, swapped for the SVG by icons(). */
+function ph(name, cls, id) { return '<i data-ic="' + name + '"' + (id ? ' data-id="' + id + '"' : "") + ' class="' + cls + '"></i>'; }
+/* Icons go in as SVG elements, as everywhere else on the page. */
+function icons(root) {
+  var els = root.querySelectorAll("[data-ic]"), i;
+  for (i = 0; i < els.length; i++) {
+    els[i].parentNode.replaceChild(icon(els[i].className || null, els[i].getAttribute("data-id"), els[i].getAttribute("data-ic")), els[i]);
+  }
+}
+function box(id, cls, tap, style, inner) {
+  return '<div id="' + id + '" class="card ' + cls + '"' + tap + ' style="' + style + '"><div class="hl"></div><div class="in"></div>' + inner + '</div>';
+}
+function setTap(key, val) { return ' data-tap="set" data-entity="' + ENT[key] + '" data-value="' + val + '"'; }
+function stepper(key, label, x) {
+  var b = function (d, side, icn) {
+    return '<div id="c-' + key + side + '" class="sb" data-tap="step" data-entity="' + ENT[key] + '" data-delta="' + d +
+      '" style="' + side + ':0"><div class="sbc">' + ph(icn, "") + '</div></div>';
+  };
+  return box("st-" + key, "stp", "", "left:" + x + "px",
+    b(-STEP_MIN, "left", "mn") + '<div class="stv"><div class="cap">' + label + '</div><div id="sv-' + key + '" class="stt">--</div></div>' + b(STEP_MIN, "right", "pl"));
+}
+function buildSettings() {
+  var t, i, j, r, k, h, n, w, o, inner;
+  for (t in SET) {
+    if (!SET.hasOwnProperty(t)) { continue; }
+    h = "";
+    for (i = 0; i < SET[t].length; i++) {
+      r = SET[t][i]; k = r[1];
+      h += '<div id="sr-' + k + '" class="srw" style="top:' + r[3] + 'px">';
+      if (r[0] === "tog") {
+        h += box("c-" + k, "tg", setTap(k, "on"), "", ph(r[5], "tgi") + '<div class="tgl">' + r[2] + '</div><div class="tgs">' + r[4] +
+          '</div><div class="swt"><div class="swg gr"></div><div class="swk"></div></div>');
+      } else {
+        h += '<div class="sr"><span class="cap">' + r[2] + '</span><span id="sx-' + k + '" class="sx"></span></div>';
+        if (r[0] === "time") {
+          h += stepper("vstart", "From", 0) + stepper("vend", "To", 228);
+        } else {
+          n = r[4].length; w = (448 - 8 * (n - 1)) / n;
+          for (j = 0; j < n; j++) {
+            o = r[4][j];
+            if (r[0] === "theme") {
+              inner = '<div class="sg"><i></i></div><div class="sn">' + o[0] + '</div>' + ph("ck", "sck");
+            } else if (o[3]) {
+              inner = o[2] ? '<div class="ct c2">' + ph(o[3], "ci") + o[1] + '</div><div class="cs">' + o[2] + '</div>'
+                           : '<div class="ct c1">' + ph(o[3], "ci") + o[1] + '</div>';
+            } else {
+              inner = '<div class="ct"><b>' + (o[1] || o[0]) + '</b>' + (o[2] || r[5]) + '</div>';
+            }
+            h += box("c-" + k + j, r[0] === "theme" ? "sw" : "chip", setTap(k, o[0]), "left:" + j * (w + 8) + "px;width:" + w + "px", inner);
+          }
+        }
+      }
+      h += "</div>";
+    }
+    $("sp-" + t).innerHTML = h;
+  }
+  icons($("page-settings"));
+}
+
+function setTab(t) {
+  var i, n;
+  tab = t;
+  for (i = 0; i < 2; i++) {
+    n = i ? "room" : "screen";
+    put("sp-" + n, null, "spn" + (n === t ? " on" : ""));
+    put("tb-" + n, null, "card tab" + (n === t ? " on" : ""));
+  }
+}
+/* Never a burst of reads on a token HA turned down (each 401 is a failed login). */
+function readSettings() { if (!locked()) { fetchStates(SKEYS); } }
+
+/* "23:30:00" as "11:30 PM", or "--". */
+function minsOf(s) {
+  var p = /^(\d\d?):(\d\d)/.exec(s || "");
+  return p ? +p[1] * 60 + +p[2] : null;
+}
+function timeText(s) {
+  var m = minsOf(s), h;
+  if (m === null) { return "--"; }
+  h = Math.floor(m / 60);
+  return (h % 12 || 12) + ":" + pad(m % 60) + "<small>" + (h < 12 ? "AM" : "PM") + "</small>";
+}
+/* A value HA holds that none of the chips matches, for the row caption. */
+function valText(k, v) {
+  var f = parseFloat(v);
+  if (k === "mode" || k === "theme") { return esc(v); }
+  if (isNaN(f)) { return esc(v); }
+  if (k === "timeout" || k === "sleep") { return f < 60 ? Math.round(f) + " s" : Math.round(f / 6) / 10 + " min"; }
+  return Math.round(f) + (k === "fanlen" ? " min" : "%");
+}
+function matches(v, opt) {
+  if (typeof opt === "number") { v = parseFloat(v); return !isNaN(v) && Math.abs(v - opt) < 0.01; }
+  return v === opt;
+}
+function paintSettings(link) {
+  var t, i, j, r, k, v, on, hit, known, off = st("vdim") === "off";
+  for (t in SET) {
+    if (!SET.hasOwnProperty(t)) { continue; }
+    for (i = 0; i < SET[t].length; i++) {
+      r = SET[t][i]; k = r[1]; v = VIRT[k] ? VIRT[k]() : st(k);
+      if (!$("sr-" + k)) { continue; }
+      known = v !== null && v !== "unknown" && v !== "unavailable";
+      if (r[0] === "tog") {
+        /* The light switch is on unless HA says off, as the look reads it. */
+        on = k === "daylight" ? v !== "off" : v === "on";
+        put("c-" + k, null, "card tg" + (on ? " soft lit" : ""));
+        /* The switch sets the other value. */
+        setAttr($("c-" + k), "data-value", on ? "off" : "on");
+      } else if (r[0] === "time") {
+        put("sv-vstart", timeText(st("vstart")), null);
+        put("sv-vend", timeText(st("vend")), null);
+      } else {
+        hit = false;
+        for (j = 0; j < r[4].length; j++) {
+          on = known && matches(v, r[4][j][0]);
+          hit = hit || on;
+          put("c-" + k + j, null, "card " + (r[0] === "theme" ? "sw" : "chip") + (on ? " on" : ""));
+        }
+        put("sx-" + k, known && !hit ? "Set to " + valText(k, v) : "", null);
+      }
+    }
+  }
+  /* The level and hours only matter while the vanity dims at night. */
+  if ($("sr-vlevel")) {
+    put("sr-vlevel", null, "srw" + (off ? " dim" : ""));
+    put("sr-vtime", null, "srw" + (off ? " dim" : ""));
+  }
+  put("stH", link.cls === "bad" ? (link.msg || "No link to Home Assistant") : (look.night ? "Night mode is on" : "Day mode is on"),
+      "hint" + (link.cls === "bad" ? " warn" : ""));
+}
+
+/* Show a new value at once; readings sent before this are ignored. */
+function settle(key, v) {
+  var o = state[key];
+  touched[key] = now();
+  state[key] = { state: v, attributes: o && o.attributes ? o.attributes : {}, last_changed: o ? o.last_changed : null };
+}
+function setValue(eid, val) {
+  var key = KEY[eid], dom = eid.split(".")[0], num1;
+  if (!key) { return; }
+  if (dom === "input_select") {
+    settle(key, val);
+    call(dom, "select_option", { entity_id: eid, option: val }, true);
+    /* Day and Night are certain; Auto waits for HA's sunset reckoning. */
+    if (key === "mode" && val !== "Auto") { settle("night", val === "Night" ? "on" : "off"); }
+  } else if (dom === "input_number") {
+    num1 = parseFloat(val);
+    settle(key, String(num1));
+    call(dom, "set_value", { entity_id: eid, value: num1 }, true);
+  } else if (dom === "input_boolean") {
+    settle(key, val);
+    call(dom, val === "on" ? "turn_on" : "turn_off", { entity_id: eid }, true);
+  } else if (dom === "input_datetime") {
+    settle(key, val);
+    call(dom, "set_datetime", { entity_id: eid, time: val }, true);
+  }
+  clearTimeout(rereadTimer);
+  rereadTimer = setTimeout(readSettings, REREAD_MS);
+  paint();
+}
+/* Night hours move in 30 minute steps, snapping to the half hour. */
+function stepTime(eid, delta) {
+  var m = minsOf(st(KEY[eid])), d = Math.abs(delta);
+  if (m === null || !d) { return; }
+  m = delta > 0 ? Math.floor(m / d) * d + d : Math.ceil(m / d) * d - d;
+  m = (m + 1440) % 1440;
+  setValue(eid, pad(Math.floor(m / 60)) + ":" + pad(m % 60) + ":00");
+}
+
+/* ---- detail pages ---- */
+/* Each sensor and weather card opens a page for its own entity: a
+   temperature or another reading the 24 hour graph ("temp"), a humidity the
+   humidity page, the weather the weather page. Back, or 15 s without a
+   touch, returns home. History and the daily forecast are fetched when a
+   page opens, never on the poll, and kept for a while. */
+var PAGES = ["temp", "humidity", "weather", "settings", "camera"], PAGE_IDLE_MS = 15000;
+var HIST_MS = 5 * 60000, DAILY_MS = 30 * 60000, DAY_MS = 864e5, HOUR_MS = 36e5, BUCKETS = 120;
+/* History per set of entities; the card whose page is open. */
+var HIST = {}, detail = null;
+var page = null, idleTimer = null;
+
+function showPage(name) {
+  var i, n, b;
+  /* Leaving the camera page stops its live picture. */
+  if (page === "camera" && name !== "camera") { $("cmI").src = ""; cam.src = ""; }
+  page = name;
+  $("home").style.display = name ? "none" : "block";
+  for (i = 0; i < PAGES.length; i++) {
+    n = PAGES[i]; b = $("bk-" + n);
+    $("page-" + n).style.display = n === name ? "block" : "none";
+    /* Only the open page's back button is a tap target. */
+    if (n === name) { b.setAttribute("data-tap", "back"); } else { b.removeAttribute("data-tap"); }
+  }
+  stayOnPage();
+}
+function goHome() { showPage(null); paint(); }
+/* Every touch on a page restarts its 15 s. */
+function stayOnPage() {
+  clearTimeout(idleTimer);
+  if (page) { idleTimer = setTimeout(goHome, page === "camera" ? cam.secs * 1000 : PAGE_IDLE_MS); }
+}
+/* c: the card tapped (settings has none). */
+function openPage(name, c) {
+  var h, d;
+  if (c) { detail = c; }
+  showPage(name);
+  if (name === "settings") {
+    setTab("screen");
+    readSettings();
+  } else if (name === "camera") {
+    /* A tapped camera row stays up a minute after the last touch. */
+    if (c) { showCamera(c.entity, c.label, CAM_IDLE_S); }
+  } else if (name === "weather") {
+    d = dailyOf(detail.entity);
+    if (!d.busy && (!d.list || now() - d.at > DAILY_MS)) { fetchDaily(detail.entity); }
+    drawHourly(); drawWeek();
+  } else {
+    h = hist(name);
+    if (!h.busy && (!h.data || now() - h.at > HIST_MS)) { fetchHist(name); }
+    drawHist(name);
+  }
+  paint();
+}
+
+function fetchDaily(e) {
+  var d = dailyOf(e);
+  d.busy = true;
+  getForecast("daily", e, function (list) {
+    d.busy = false;
+    if (list) { d.list = list; d.at = now(); }
+    if (page === "weather") { drawWeek(); }
+    paint();
+  });
+}
+
+/* The entities a graph page needs: the card's, and for humidity its usual
+   level and the fan. */
+function hist(name) {
+  var ids = [detail.entity], k;
+  if (name === "humidity") {
+    if (detail.baseline) { ids.push(detail.baseline); }
+    ids.push(ENT.fan);
+  }
+  k = ids.join(",");
+  return HIST[k] || (HIST[k] = { ids: ids });
+}
+/* One request per open with every entity the page needs. */
+function fetchHist(name) {
+  var h = hist(name), start = new Date(now() + clockSkew - DAY_MS).toISOString().replace(/\.\d+Z$/, "Z");
+  var q = "history/period/" + start + "?filter_entity_id=" + h.ids.join(",") + "&minimal_response&no_attributes&significant_changes_only";
+  h.busy = true;
+  if (BRIDGE) {
+    if (!hassOf()) { h.busy = false; return; }
+    hassOf().callApi("GET", q).then(function (list) {
+      var data = null;
+      h.busy = false;
+      try { data = histMap(list); } catch (e) { data = null; }
+      h.err = !data;
+      if (data) { h.data = data; h.at = now(); }
+      if (page === name) { drawHist(name); }
+    }, function () { h.busy = false; h.err = true; if (page === name) { drawHist(name); } });
+    return;
+  }
+  xhr("GET", API + q, null, function (status, txt) {
+    var data = null;
+    h.busy = false;
+    if (status === 401) { rejected = true; }
+    if (status === 200) { try { data = histMap(JSON.parse(txt)); } catch (e) { data = null; } }
+    h.err = !data;
+    if (data) { h.data = data; h.at = now(); }
+    if (page === name) { drawHist(name); }
+  }, true);
+}
+/* One array per entity; only its first item names the entity. */
+function histMap(list) {
+  var out = {}, i, j, a, t;
+  for (i = 0; i < list.length; i++) {
+    a = list[i];
+    if (!a || !a.length || !a[0].entity_id) { continue; }
+    out[a[0].entity_id] = [];
+    for (j = 0; j < a.length; j++) {
+      t = parseIso(a[j].last_changed || a[j].last_updated);
+      if (t !== null) { out[a[0].entity_id].push({ t: t, s: a[j].state }); }
+    }
+  }
+  return out;
+}
+/* History plus the live reading, when that is newer. */
+function withLive(pts, key) {
+  var s = state[key], t = s ? parseIso(s.last_changed) : null;
+  pts = (pts || []).slice();
+  if (t !== null && (!pts.length || t > pts[pts.length - 1].t)) { pts.push({ t: t, s: s.state }); }
+  return pts;
+}
+/* Unknown and unavailable become gaps (v null). */
+function numbers(pts) {
+  var out = [], i, v;
+  for (i = 0; i < pts.length; i++) { v = parseFloat(pts[i].s); out.push({ t: pts[i].t, v: isNaN(v) ? null : v }); }
+  return out;
+}
+/* [start, end] of each stretch that was "on", inside t0..t1. */
+function onSpans(pts, t0, t1) {
+  var out = [], i, a = null, e;
+  for (i = 0; i <= pts.length; i++) {
+    e = i < pts.length ? pts[i] : { t: t1, s: "" };
+    if (e.s === "on") { if (a === null) { a = e.t; } }
+    else if (a !== null) { if (e.t > t0) { out.push([Math.max(a, t0), e.t]); } a = null; }
+  }
+  return out;
+}
+/* Low, high (with when) and the time-weighted average over t0..t1; each
+   reading holds until the next. */
+function stats(pts, t0, t1) {
+  var s = null, i, v, a, b;
+  for (i = 0; i < pts.length; i++) {
+    v = pts[i].v; a = Math.max(pts[i].t, t0); b = Math.min(i + 1 < pts.length ? pts[i + 1].t : t1, t1);
+    if (v === null || b < a) { continue; }
+    if (!s) { s = { lo: v, hi: v, tlo: a, thi: a, sum: 0, dur: 0 }; }
+    if (v < s.lo) { s.lo = v; s.tlo = a; }
+    if (v > s.hi) { s.hi = v; s.thi = a; }
+    s.sum += v * (b - a); s.dur += b - a;
+  }
+  if (s) { s.avg = s.dur ? s.sum / s.dur : s.lo; }
+  return s;
+}
+/* Down to n buckets, keeping each bucket's low and high in the order they
+   happened so a short shower spike survives; at most 2n + 1 points. */
+function sample(pts, t0, t1, n) {
+  var bw = (t1 - t0) / n, out = [], i = 0, cur = null, b, bs, lo, hi, tlo, thi, v;
+  while (i < pts.length && pts[i].t <= t0) { cur = pts[i].v; i++; }
+  for (b = 0; b < n; b++) {
+    bs = t0 + b * bw; lo = hi = cur; tlo = thi = bs;
+    while (i < pts.length && pts[i].t < bs + bw) {
+      v = cur = pts[i].v;
+      if (v !== null) {
+        if (lo === null || v < lo) { lo = v; tlo = pts[i].t; }
+        if (hi === null || v > hi) { hi = v; thi = pts[i].t; }
+      }
+      i++;
+    }
+    out.push({ t: bs, v: tlo <= thi ? lo : hi });
+    if (lo !== hi) { out.push({ t: bs + bw / 2, v: tlo <= thi ? hi : lo }); }
+  }
+  out.push({ t: t1, v: cur });
+  return out;
+}
+
+/* ---- charts (inline SVG built here) ---- */
+/* The guide line step: the smallest 1, 2 or 5 times a power of ten, from
+   `least` up, that leaves at most five lines; 0 (no lines) for a range that
+   is not a number. */
+function niceStep(span, least) {
+  var p = least, m = [1, 2, 5], i;
+  if (!(span > 0 && span < Infinity && p > 0)) { return 0; }
+  for (;;) {
+    for (i = 0; i < 3; i++) { if (span / (p * m[i]) <= 5) { return p * m[i]; } }
+    p *= 10;
+  }
+}
+function S(tag, at, parent, text) {
+  var e = document.createElementNS(SVGNS, tag), k;
+  for (k in at) { if (at.hasOwnProperty(k)) { e.setAttribute(k, at[k]); } }
+  if (text !== undefined) { e.appendChild(document.createTextNode(text)); }
+  parent.appendChild(e);
+  return e;
+}
+function clear(el) { while (el.firstChild) { el.removeChild(el.firstChild); } }
+function f1(n) { return n.toFixed(1); }
+/* Path data through {x, y} points, broken where y is null. */
+function runs(pts) {
+  var out = [], cur = null, i, p;
+  for (i = 0; i < pts.length; i++) {
+    p = pts[i];
+    if (p.y === null) { cur = null; continue; }
+    if (!cur) { cur = { d: "M", a: p.x }; out.push(cur); } else { cur.d += "L"; }
+    cur.d += f1(p.x) + " " + f1(p.y);
+    cur.b = p.x;
+  }
+  return out;
+}
+/* The gradient line over a shaded area down to y = bottom. */
+function curve(svg, pts, bottom) {
+  var r = runs(pts), i;
+  for (i = 0; i < r.length; i++) {
+    S("path", { d: r[i].d + "L" + f1(r[i].b) + " " + bottom + "L" + f1(r[i].a) + " " + bottom + "Z", fill: "url(#gf)" }, svg);
+    S("path", { d: r[i].d, fill: "none", stroke: "url(#gl)", "stroke-width": 3, "stroke-linejoin": "round", "stroke-linecap": "round" }, svg);
+  }
+}
+/* 24 h chart: guide lines with labels, a line every 6 hours on the clock,
+   fan runs shaded behind the curves, and a dot on the latest reading. Guide
+   lines step by whole units from `least` (1 for the room readings); with
+   none given the step follows the range, fractions included. */
+function chart(svg, t0, t1, main, base, spans, minSpan, sfx, least) {
+  var H = +svg.getAttribute("height"), X0 = 56, X1 = 420, Y0 = +svg.getAttribute("data-top"), Y1 = H - 44;
+  var lo = null, hi = null, all = main.concat(base || []), i, v, c, x, w, t, d, r, n, dec, grid = lt("#e6ebf1", "#1c2634");
+  function X(t) { return X0 + (t - t0) / (t1 - t0) * (X1 - X0); }
+  function Y(v) { return v === null ? null : Y1 - (v - lo) / (hi - lo) * (Y1 - Y0); }
+  function xy(p) { return { x: X(p.t), y: Y(p.v) }; }
+  for (i = 0; i < all.length; i++) {
+    v = all[i].v;
+    if (v !== null) { if (lo === null || v < lo) { lo = v; } if (hi === null || v > hi) { hi = v; } }
+  }
+  if (hi - lo < minSpan) { c = (hi + lo) / 2; lo = c - minSpan / 2; hi = c + minSpan / 2; }
+  c = (hi - lo) * 0.1; lo -= c; hi += c;
+  c = niceStep(hi - lo, least || Math.pow(10, Math.floor(Math.log((hi - lo) / 5) / Math.LN10)));
+  dec = c < 1 ? Math.ceil(-Math.log(c) / Math.LN10 - 1e-9) : 0;
+  for (n = Math.ceil(lo / c); c > 0 && n * c <= hi; n++) {
+    v = n * c;
+    if (Y1 - Y(v) > 10) { S("line", { x1: X0, x2: X1, y1: f1(Y(v)), y2: f1(Y(v)), stroke: grid }, svg); }
+    /* Thousands as "1.5k", to fit left of the chart. */
+    S("text", { x: X0 - 10, y: f1(Y(v) + 5), "text-anchor": "end" }, svg,
+      (Math.abs(v) >= 1000 ? +(v / 1000).toFixed(Math.abs(v) >= 1e4 ? 0 : 1) + "k" : (dec ? v.toFixed(dec) : v)) + sfx);
+  }
+  d = new Date(t0); d.setMinutes(0, 0, 0);
+  for (t = d.getTime() + HOUR_MS; t < t1; t += HOUR_MS) {
+    d = new Date(t);
+    if (d.getHours() % 6) { continue; }
+    x = X(t);
+    S("line", { x1: f1(x), x2: f1(x), y1: Y0, y2: Y1, stroke: grid }, svg);
+    if (x - X0 > 22 && X1 - x > 50) { S("text", { x: f1(x), y: H - 14, "text-anchor": "middle" }, svg, hr(d)); }
+  }
+  /* Fan runs go over the grid, so a clock line never cuts the band. */
+  for (i = 0; i < spans.length; i++) {
+    x = X(spans[i][0]); w = f1(Math.max(6, X(spans[i][1]) - x));
+    S("rect", { x: f1(x), y: Y0, width: w, height: Y1 - Y0, fill: look.c[0], "fill-opacity": lt(".13", ".24") }, svg);
+    S("rect", { x: f1(x), y: Y0, width: w, height: 6, fill: look.c[0], "fill-opacity": "1" }, svg);
+  }
+  S("text", { x: X1 + 4, y: H - 14, "text-anchor": "end", "class": "nw" }, svg, "Now");
+  S("line", { x1: X0, x2: X1, y1: Y1, y2: Y1, stroke: lt("#cbd5e1", "#2a3546") }, svg);
+  r = runs(base ? base.map(xy) : []);
+  for (i = 0; i < r.length; i++) {
+    S("path", { d: r[i].d, fill: "none", stroke: lt("#475569", "#aab6c6"), "stroke-opacity": ".75", "stroke-width": 2, "stroke-dasharray": "7 6" }, svg);
+  }
+  curve(svg, main.map(xy), Y1);
+  v = main[main.length - 1].v;
+  if (v !== null) {
+    S("circle", { cx: X1, cy: f1(Y(v)), r: 12, fill: look.c[0], opacity: look.night ? "0" : ".22" }, svg);
+    S("circle", { cx: X1, cy: f1(Y(v)), r: 6, fill: ink() }, svg);
+  }
+}
+
+function stat(id, val, sub) { put(id + "1", val, null); put(id + "2", sub, null); }
+function drawHist(name) {
+  var h = hist(name), p = name === "temp" ? "tp" : "hp", t1 = now() + clockSkew, t0 = t1 - DAY_MS;
+  var s = null, main, base = null, spans = [], fan = 0, i, when, u, val;
+  /* The live reading alone is not a history. */
+  if (h.data && numbers(h.data[h.ids[0]] || []).some(function (q) { return q.v !== null; })) {
+    main = numbers(withLive(h.data[h.ids[0]], detail.key));
+    s = stats(main, t0, t1);
+  }
+  put(p + "M", s ? "" : (h.busy ? "Loading" : (h.err ? "Could not load the history" : "No data yet")),
+      "gm" + (!s && !h.busy && h.err ? " err" : ""));
+  clear($(p + "G"));
+  if (!s) { stat(p + "A", "--", ""); stat(p + "B", "--", ""); stat(p + "C", "--", ""); return; }
+  when = function (t) { return "at " + hr(new Date(t), true); };
+  if (name === "temp" && detail.kind === "sensor") {
+    /* Any other reading: its own unit, and a range that suits it. */
+    u = attr(detail.key, "unit_of_measurement") || "";
+    val = function (x) { return numText(x) + "<small>" + esc(u) + "</small>"; };
+    chart($(p + "G"), t0, t1, sample(main, t0, t1, BUCKETS), null, spans,
+          Math.max(Math.abs(s.lo), Math.abs(s.hi)) * 0.1 || 1, u.length <= 2 ? u : "", 0);
+    stat(p + "A", val(s.lo), when(s.tlo));
+    stat(p + "B", val(s.avg), "Over 24 hours");
+    stat(p + "C", val(s.hi), when(s.thi));
+    return;
+  }
+  if (name === "temp") {
+    chart($(p + "G"), t0, t1, sample(main, t0, t1, BUCKETS), null, spans, 2, "°", 1);
+    stat(p + "A", f1(s.lo) + "&deg;", when(s.tlo));
+    stat(p + "B", f1(s.avg) + "&deg;", "Over 24 hours");
+    stat(p + "C", f1(s.hi) + "&deg;", when(s.thi));
+    return;
+  }
+  base = numbers(detail.baseline ? h.data[detail.baseline] || [] : []);
+  spans = onSpans(withLive(h.data[ENT.fan], "fan"), t0, t1);
+  for (i = 0; i < spans.length; i++) { fan += spans[i][1] - spans[i][0]; }
+  chart($(p + "G"), t0, t1, sample(main, t0, t1, BUCKETS), base.length ? sample(base, t0, t1, BUCKETS) : null, spans, 8, "%", 1);
+  stat(p + "A", Math.round(s.lo) + "<small>%</small>", when(s.tlo));
+  stat(p + "B", Math.round(s.hi) + "<small>%</small>", when(s.thi));
+  fan = Math.round(fan / 60000);
+  stat(p + "C", fan < 60 ? fan + "<small>min</small>" : f1(fan / 60) + "<small>h</small>",
+       spans.length ? spans.length + (spans.length > 1 ? " runs" : " run") : "No runs");
+}
+
+/* ---- weather page ---- */
+function has(x) { return x !== undefined && x !== null && x !== "" && !isNaN(parseFloat(x)); }
+function precip(p, u) { return u === "mm" ? f1(p) : Math.max(p, 0.01).toFixed(2); }
+function uvWord(u) { return u < 3 ? "Low" : (u < 6 ? "Moderate" : (u < 8 ? "High" : (u < 11 ? "Very high" : "Extreme"))); }
+function todayDaily(daily) {
+  var i, t, s = new Date().toDateString();
+  for (i = 0; daily && i < daily.length; i++) {
+    t = parseIso(daily[i].datetime);
+    if (t !== null && new Date(t).toDateString() === s) { return daily[i]; }
+  }
+  return null;
+}
+/* The next 24 hours: the temperature curve, and every 3 hours the hour, an
+   icon and the temperature; a bar under each hour with precipitation and the
+   3 hour total under each column. */
+function drawHourly() {
+  var svg = $("whG"), tn = now() + clockSkew, L = [], i, f, t, v, lo = null, hi = null, c, n, x, d, ic, sum, bar = false;
+  var X0 = 32, X1 = 412, YT = 86, YB = 122, u = attr(detail.key, "precipitation_unit") || "in";
+  var fc = fcOf(detail.entity), forecast = fc.list;
+  clear(svg);
+  for (i = 0; forecast && i < forecast.length && L.length < 24; i++) {
+    f = forecast[i]; t = parseIso(f.datetime); v = parseFloat(f.temperature);
+    if (t === null || t <= tn || isNaN(v)) { continue; }
+    L.push({ t: t, v: v, c: f.condition, p: parseFloat(f.precipitation) || 0 });
+    if (lo === null || v < lo) { lo = v; }
+    if (hi === null || v > hi) { hi = v; }
+  }
+  put("whM", L.length > 1 ? "" : (fc.busy ? "Loading" : "Forecast unavailable"), "gm" + (L.length > 1 || fc.busy ? "" : " err"));
+  if (L.length < 2) { put("whR", null, "rl gone"); return; }
+  if (hi - lo < 6) { c = (hi + lo) / 2; lo = c - 3; hi = c + 3; }
+  n = L.length - 1;
+  for (i = 0; i < L.length; i++) { L[i].x = X0 + i * (X1 - X0) / n; L[i].y = YB - (L[i].v - lo) / (hi - lo) * (YB - YT); }
+  curve(svg, L, YB + 16);
+  for (i = 0; i < L.length; i++) {
+    x = L[i].x;
+    if (L[i].p > 0) {
+      bar = true;
+      c = 5 + Math.min(1, L[i].p / (u === "mm" ? 2.5 : 0.1)) * 11;
+      S("rect", { x: f1(x - 4), y: f1(159 - c), width: 8, height: f1(c), rx: 2, fill: lt("#0ea5e9", "#38bdf8"), "fill-opacity": ".85" }, svg);
+    }
+    if (i % 3) { continue; }
+    d = new Date(L[i].t); ic = wxIcon(L[i].c, d.getHours());
+    S("text", { x: f1(x), y: 15, "text-anchor": "middle" }, svg, hr(d));
+    S("use", { x: f1(x - 14), y: 24, width: 28, height: 28, fill: wxFill(ic) }, svg).setAttributeNS(XLINK, "xlink:href", "#i-" + ic);
+    S("circle", { cx: f1(x), cy: f1(L[i].y), r: 4, fill: ink() }, svg);
+    S("text", { x: f1(x), y: f1(L[i].y - 11), "text-anchor": "middle", "class": "tv" }, svg, Math.round(L[i].v) + "°");
+    sum = L[i].p + (L[i + 1] ? L[i + 1].p : 0) + (L[i + 2] ? L[i + 2].p : 0);
+    if (sum > 0) { S("text", { x: f1(x), y: 177, "text-anchor": "middle", "class": "pv" }, svg, precip(sum, u)); }
+  }
+  put("whR", "<i></i>Rain, " + u, "rl" + (bar ? "" : " gone"));
+}
+/* Six days, each with its low to high bar on one scale for the whole week. */
+function drawWeek() {
+  var rows = [], i, f, t, r, lo = null, hi = null, a, b, W = 132, ic, st, now0 = new Date().toDateString();
+  var u = attr(detail.key, "precipitation_unit") || "in", cur = parseFloat(attr(detail.key, "temperature"));
+  var dy = dailyOf(detail.entity), daily = dy.list;
+  for (i = 0; daily && i < daily.length && rows.length < 6; i++) {
+    f = daily[i]; t = parseIso(f.datetime);
+    r = { d: t === null ? null : new Date(t), h: parseFloat(f.temperature), l: parseFloat(f.templow), c: f.condition, p: parseFloat(f.precipitation) || 0 };
+    if (!r.d || isNaN(r.h)) { continue; }
+    if (isNaN(r.l)) { r.l = r.h; }
+    rows.push(r);
+    lo = lo === null ? r.l : Math.min(lo, r.l);
+    hi = hi === null ? r.h : Math.max(hi, r.h);
+  }
+  put("wkM", rows.length ? "" : (dy.busy ? "Loading" : "Forecast unavailable"), "gm" + (rows.length || dy.busy ? "" : " err"));
+  if (hi - lo < 1) { hi = lo + 1; }
+  for (i = 0; i < 6; i++) {
+    r = rows[i];
+    $("wr" + i).style.visibility = r ? "visible" : "hidden";
+    if (!r) { continue; }
+    ic = wxIcon(r.c, 12);
+    put("wd" + i, r.d.toDateString() === now0 ? "Today" : DAYS[r.d.getDay()], null);
+    useIcon("wu" + i, ic);
+    setAttr($("wu" + i), "fill", wxFill(ic));
+    put("wp" + i, r.p > 0 ? precip(r.p, u) + " " + u : "", null);
+    put("wl" + i, Math.round(r.l) + "&deg;", null);
+    put("wh" + i, Math.round(r.h) + "&deg;", null);
+    a = Math.round((r.l - lo) / (hi - lo) * W);
+    b = Math.max(a + 8, Math.round((r.h - lo) / (hi - lo) * W));
+    st = $("wb" + i).style;
+    st.left = a + "px"; st.width = (b - a) + "px"; st.backgroundPosition = -a + "px 0";
+    /* Where today's temperature is now. */
+    st = $("wn" + i).style;
+    st.display = r.d.toDateString() === now0 && !isNaN(cur) ? "block" : "none";
+    st.left = Math.round(Math.max(0, Math.min(1, (cur - lo) / (hi - lo))) * W) + "px";
+  }
+}
+
+/* The camera page: which camera, how long it stays up, and the address its
+   picture is showing (set once its state, with the token, is known). */
+var CAM_IDLE_S = 60, cam = { eid: null, label: "", secs: CAM_IDLE_S, src: "", list: null, idx: 0 }, camRatio = 0.75, camBox = "";
+/* The live picture's frame takes the picture's shape (4:3 until it loads),
+   as big as fits under the title and centred there: full width in portrait,
+   the screen's height in landscape. */
+function frameCamera() {
+  var W = land ? 752 : 444, top = land ? 88 : 96, bottom = land ? 480 : ROW_END, H = bottom - top - 4;
+  var w = W, h = Math.round(W * camRatio), key;
+  if (h > H) { h = H; w = Math.round(H / camRatio); }
+  if (h < 180) { h = 180; }
+  key = w + "x" + h + (land ? "l" : "");
+  if (key === camBox) { return; }
+  camBox = key;
+  $("cmI").style.width = w + "px"; $("cmI").style.height = h + "px";
+  $("cmF").style.width = w + 4 + "px"; $("cmF").style.height = h + 4 + "px";
+  $("cmF").style.left = Math.round(((land ? 788 : 480) - w - 4) / 2) + "px";
+  $("cmF").style.top = Math.round(top + (bottom - top - h - 4) / 2) + "px";
+  
+}
+function fitCamera() {
+  var im = $("cmI");
+  if (im.naturalWidth) { camRatio = im.naturalHeight / im.naturalWidth; frameCamera(); }
+}
+function showCamera(eid, label, secs, list, idx) {
+  cam.eid = eid; cam.label = label || ""; cam.secs = secs; cam.src = "";
+  cam.list = list || null; cam.idx = idx || 0;
+  $("cmI").src = "";
+  if (page !== "camera") { showPage("camera"); } else { stayOnPage(); }
+  /* Read it now: a pop-up names a camera no row polls. */
+  if (!locked() && !state[keyOf(eid)]) { fetchStates([keyOf(eid)]); }
+  paint();
+}
+function paintCameraPage() {
+  var s = state[keyOf(cam.eid)], a = s && s.attributes, want;
+  put("cmL", esc(cam.label || (a && a.friendly_name) || "Camera"), null);
+  
+  want = streamUrl(cam.eid, a);
+  if (want && !cam.src) { cam.src = want; $("cmI").src = want; }
+  put("cmN", s && s.state === "unavailable" ? "Camera unavailable" : (cam.src ? "" : "Connecting"), null);
+}
+/* HA's pop-up line (input_text.<panel>_popup): {"c": camera, "t": title,
+   "s": seconds, "at": epoch seconds}. A new one shows that camera for its
+   seconds; one older than that (a reload finding it still set) is not shown
+   again. */
+var popSeen = "";
+function checkPopup() {
+  var s = st("popup"), o, key, eid, secs, at;
+  if (!s || s === "unknown" || s === "unavailable") { return; }
+  key = s + "|" + (state.popup.last_changed || "");
+  if (key === popSeen) { return; }
+  popSeen = key;
+  try { o = JSON.parse(s); } catch (e) { return; }
+  if (!o || typeof o !== "object") { return; }
+  at = +o.at || 0;
+  
+  eid = entity(o.c || o.camera, "camera");
+  if (!eid) { return; }
+  secs = Math.max(5, Math.min(600, Math.round(+o.s || +o.seconds || CAM_IDLE_S)));
+  if (at && Math.abs((now() + clockSkew) / 1000 - at) > secs) { return; }
+  
+  showCamera(eid, textOf(o.t || o.title, ""), secs);
+}
+
+/* Live values on the open page; the charts are drawn when data arrives. */
+function paintPage(v) {
+  var k, w, a, u, t, h, r, s, td, uv, o;
+  if (page === "camera") { paintCameraPage(); return; }
+  if (page === "temp") {
+    k = detail.key; t = num(k); u = attr(k, "unit_of_measurement") || "";
+    put("tpL", esc(detail.label), null);
+    useIcon("tpI", detail.icon);
+    if (detail.kind === "sensor") {
+      put("tpV", t === null ? "--" : numText(t) + "<small>" + esc(u) + "</small>", null);
+      put("tpS", "", null);
+    } else {
+      put("tpV", t === null ? "--" : f1(t) + "&deg;<small>" + unitOf(u) + "</small>", null);
+      put("tpS", tempWord(t, u), null);
+    }
+    /* Next to a temperature, the outside now from the layout's weather. */
+    o = detail.kind === "temperature" ? outside() : null;
+    w = o ? state[o] : null; a = w && w.attributes;
+    put("tpR", null, "ref" + (o ? "" : " gone"));
+    put("tpO", a ? deg(parseFloat(a.temperature), a.temperature_unit) : "--", null);
+    put("tpOc", a && WX[w.state] ? WX[w.state][1] : "&nbsp;", null);
+    if (a) { useIcon("tpOu", wxIcon(w.state, new Date().getHours())); }
+  } else if (page === "humidity") {
+    h = num(detail.key); r = detail.riseKey ? num(detail.riseKey) : null; s = humStatus(v, detail);
+    put("hpL", esc(detail.label), null);
+    useIcon("hpI", detail.icon);
+    put("hpLu", null, detail.baseline ? "" : "hid");
+    put("hpV", h === null ? "--" : Math.round(h) + "<small>%</small>", null);
+    put("hpS", s[0], "hs" + (s[1] ? " hot" : ""));
+    put("hpU", h === null || r === null ? "--" : Math.round(h - r) + "<small>%</small>", null);
+    put("hpF", !v.known ? "&nbsp;" : (v.on ? (v.steam ? "Fan on for steam" : "Fan on") : "Fan off"), null);
+  } else if (page === "weather") {
+    w = state[detail.key]; a = w && w.attributes;
+    td = todayDaily(dailyOf(detail.entity).list);
+    put("wpD", esc(detail.label) + " | " + dateLine(new Date()), null);
+    put("wtT", a ? deg(parseFloat(a.temperature), a.temperature_unit) : "--", null);
+    put("wtC", a ? (WX[w.state] ? WX[w.state][1] : "&nbsp;") : "Weather unavailable", null);
+    if (a) { useIcon("wtU", wxIcon(w.state, new Date().getHours())); }
+    put("wtHi", td && has(td.temperature) ? Math.round(td.temperature) + "&deg;" : "--", null);
+    put("wtLo", td && has(td.templow) ? Math.round(td.templow) + "&deg;" : "--", null);
+    put("wtHu", a && has(a.humidity) ? Math.round(a.humidity) + "%" : "--", null);
+    put("wtW", a && wind(a) ? wind(a) : "--", null);
+    uv = a && has(a.uv_index) ? a.uv_index : (td && has(td.uv_index) ? td.uv_index : null);
+    put("wtV", uv === null ? "--" : Math.round(uv) + "<small>" + uvWord(uv) + "</small>", null);
+  }
+}
+
+/* ---- actions ---- */
+function fake(s, attributes) { return { state: s, attributes: attributes || {} }; }
+
+function startRun(min) {
+  actedAt = now();
+  call("script", "turn_on", { entity_id: ENT.script, variables: { minutes: min } });
+  /* Show it now; the next poll confirms. The script clears the steam baseline. */
+  state.fan = fake("on");
+  state.steam = fake("0");
+  state.timer = fake("active", {
+    finishes_at: new Date(now() + clockSkew + min * 60000).toISOString(),
+    duration: Math.floor(min / 60) + ":" + pad(min % 60) + ":00"
+  });
+  paint();
+}
+
+function stopFan() {
+  actedAt = now();
+  call("fan", "turn_off", { entity_id: ENT.fan });
+  state.fan = fake("off");
+  state.timer = fake("idle");
+  paint();
+}
+
+/* A tile or a status row: toggle its entity, or run it. A second tap within
+   a moment is a double tap, not a second action. */
+var held = {}, HOLD_MS = 1200;
+function tapEntity(eid, flip) {
+  var k = keyOf(eid), dom = domOf(eid), s = st(k);
+  if (now() < (held[eid] || 0)) { return; }
+  held[eid] = now() + HOLD_MS;
+  if (flip) {
+    call(dom, "toggle", { entity_id: eid });
+    /* Show it now; readings sent before this are ignored. */
+    if (s === "on" || s === "off") { settle(k, s === "on" ? "off" : "on"); }
+  } else {
+    call(dom, RUN[dom], { entity_id: eid });
+  }
+  paint();
+}
+
+function act(el) {
+  var what = el.getAttribute("data-tap");
+  if (what === "back") { goHome(); return; }
+  if (what === "page") { openPage(el.getAttribute("data-page"), homeCards[el.getAttribute("data-card")]); return; }
+  if (what === "tab") { setTab(el.getAttribute("data-tab")); paint(); return; }
+  if (what === "alert") { dismissAlert(); return; }
+  
+  if (locked()) { return; }
+  if (what === "set") {
+    setValue(el.getAttribute("data-entity"), el.getAttribute("data-value"));
+  } else if (what === "step") {
+    stepTime(el.getAttribute("data-entity"), parseInt(el.getAttribute("data-delta"), 10));
+  } else if (what === "fan") {
+    if (fanView().on) { stopFan(); } else { startRun(tapMin()); }
+  } else if (what === "run") {
+    startRun(parseInt(el.getAttribute("data-min"), 10));
+  } else if (what === "toggle" || what === "trigger") {
+    tapEntity(el.getAttribute("data-entity"), what === "toggle");
+  }
+}
+
+/* ---- touch ---- */
+/* Act on touchend: the stock browser holds clicks back 300 ms. The ring is a
+   60 minute scale from OFF at 12 o'clock; drag sets 5 minute steps, lifting the
+   finger starts the run, and a plain tap on the ring does nothing. */
+var dialEl, app = $("app");
+
+function tapTarget(el) {
+  if (el && el.correspondingUseElement) { el = el.correspondingUseElement; }
+  while (el && el.getAttribute && !el.getAttribute("data-tap")) { el = el.parentNode; }
+  return el && el.getAttribute ? el : null;
+}
+function dialPoint(x, y) {
+  var r = dialEl.getBoundingClientRect(), s = r.width / (2 * C);
+  var dx = x - (r.left + r.width / 2), dy = y - (r.top + r.height / 2);
+  return { d: Math.sqrt(dx * dx + dy * dy) / s, a: Math.atan2(dx, -dy) };
+}
+function turn(a) { return (a < 0 ? a + 2 * Math.PI : a) / (2 * Math.PI) * DIAL_MIN; }
+function minutesAt(a, prev) {
+  var m = Math.round(turn(a) / SNAP_MIN) * SNAP_MIN;
+  /* No wrapping past 12 o'clock: stay at the end the finger came from. */
+  if (prev !== null && Math.abs(m - prev) > DIAL_MIN / 2) { m = prev >= DIAL_MIN / 2 ? DIAL_MIN : 0; }
+  return m;
+}
+/* A drag that starts near the knob starts from its value, so grabbing OFF from
+   just left of 12 o'clock counts from 0, not 60. */
+function grabStart(a) {
+  var v = fanView(), k = v.on && v.left !== null ? Math.min(DIAL_MIN, v.left / 60000) : 0;
+  var d = Math.abs(turn(a) - k) % DIAL_MIN;
+  return Math.min(d, DIAL_MIN - d) <= GRAB_MIN ? k : minutesAt(a, null);
+}
+function setDown(el, on) {
+  el.className = el.className.replace(/ down/g, "") + (on ? " down" : "");
+  delete shown[el.id];
+}
+
+function begin(x, y, target) {
+  var el = tapTarget(target), p;
+  press = null; swipe = null; lastUse = now();
+  
+  /* On a page only the back button reacts, with or without a token. */
+  if (page) {
+    if (el) { press = { el: el, x: x, y: y }; setDown(el, true); }
+    return;
+  }
+  if (locked()) { return; }
+  p = dialPoint(x, y);
+  if (!el || el.id === "fan") {
+    if (p.d < DISC_R) { el = $("fan"); }
+    else if (p.d <= RING_OUT) { press = { dial: true, x: x, y: y, start: grabStart(p.a), moved: false }; return; }
+  }
+  if (el) { press = { el: el, x: x, y: y }; setDown(el, true); }
+}
+function move(x, y) {
+  
+  if (!press) { return; }
+  var far = Math.abs(x - press.x) > 10 || Math.abs(y - press.y) > 10, m;
+  if (press.dial) {
+    if (!press.moved && !far) { return; }
+    press.moved = true;
+    m = minutesAt(dialPoint(x, y).a, drag ? drag.min : press.start);
+    if (!drag || drag.min !== m) { drag = { min: m }; paint(); }
+  } else if (far) {
+    setDown(press.el, false); press = null;
+  }
+}
+function end() {
+  var p = press, m;
+  press = null;
+  
+  if (!p) { return false; }
+  if (p.dial) {
+    if (drag) {
+      m = drag.min; drag = null;
+      if (locked()) { paint(); }
+      else if (m > 0) { startRun(m); }
+      /* Released at OFF: only send a stop when the fan is on. */
+      else if (st("fan") === "on") { stopFan(); }
+      else { paint(); }
+    }
+    return true;
+  }
+  setDown(p.el, false);
+  act(p.el);
+  return true;
+}
+function cancel() {
+  if (press && press.el) { setDown(press.el, false); }
+  press = null; swipe = null;
+  
+  if (drag) { drag = null; paint(); }
+}
+
+app.addEventListener("touchstart", function (e) {
+  var t = e.touches[0];
+  lastTouch = now();
+  stayOnPage();
+  begin(t.clientX, t.clientY, e.target);
+  /* Old Android drops touchmove unless the touch is claimed early; on #app
+     because document-level touch listeners are passive in newer browsers. */
+  if (press && press.dial) { e.preventDefault(); }
+}, false);
+app.addEventListener("touchmove", function (e) {
+  if (!press && !swipe) { return; }
+  move(e.touches[0].clientX, e.touches[0].clientY);
+  /* The Wink needs the move claimed early; a larger display only for a
+     dial drag or a page swipe, so the cameras page can scroll. */
+  if (V.va ? (press && press.dial) || (swipe && swipe.on) : true) { e.preventDefault(); }
+}, false);
+app.addEventListener("touchend", function (e) {
+  lastTouch = now();
+  if (end()) { e.preventDefault(); }
+  stayOnPage();
+}, false);
+app.addEventListener("touchcancel", cancel, false);
+
+/* Mouse, for desktop testing; skip the mouse events made up after a touch. */
+document.addEventListener("mousedown", function (e) {
+  if (now() - lastTouch < 800) { return; }
+  mouseDown = true;
+  stayOnPage();
+  begin(e.clientX, e.clientY, e.target);
+}, false);
+document.addEventListener("mousemove", function (e) {
+  if (mouseDown) { move(e.clientX, e.clientY); }
+}, false);
+document.addEventListener("mouseup", function () {
+  if (!mouseDown) { return; }
+  mouseDown = false;
+  end();
+}, false);
+
+
+
+/* ---- run ---- */
+function mk(tag, cls, ns) {
+  var e = ns ? document.createElementNS(SVGNS, tag) : document.createElement(tag);
+  if (cls) { e.setAttribute("class", cls); }
+  return e;
+}
+function icon(cls, id, name) {
+  var svg = mk("svg", cls, true), use = svg.appendChild(mk("use", null, true));
+  svg.setAttribute("viewBox", "0 0 24 24");
+  if (id) { use.setAttribute("id", id); }
+  use.setAttribute("width", "24"); use.setAttribute("height", "24");
+  if (name) { use.setAttributeNS(XLINK, "xlink:href", "#i-" + name); }
+  return svg;
+}
+/* The week rows and a back button on each page. */
+function build() {
+  var i, row, pg, b;
+  for (i = 0; i < 6; i++) {
+    row = $("wk").appendChild(mk("div", "wr"));
+    row.id = "wr" + i;
+    row.innerHTML = '<div id="wd' + i + '" class="wdn"></div><div id="wp' + i + '" class="wrp"></div>' +
+      '<div id="wl' + i + '" class="wrl"></div><div class="wtr"><i id="wb' + i + '" class="gr"></i><b id="wn' + i + '"></b></div>' +
+      '<div id="wh' + i + '" class="wrh"></div>';
+    row.appendChild(icon("wri", "wu" + i));
+  }
+  for (i = 0; i < PAGES.length; i++) {
+    pg = $("page-" + PAGES[i]);
+    b = mk("div", "card soft back");
+    b.id = "bk-" + PAGES[i];
+    b.innerHTML = '<div class="hl"></div><div class="in"></div>';
+    b.appendChild(icon(null, null, "bk"));
+    pg.insertBefore(b, pg.firstChild);
+  }
+}
+
+/* Home Assistant serves /local/ with a 31 day cache lifetime, so a new copy
+   of this page would never reach the wall on its own. Half a minute after
+   loading, then every 10 minutes, fetch the page with a throwaway query
+   (which skips the cache), and if its version stamp differs from ours, load
+   it. */
+var PANEL_VERSION = "__PANEL_VERSION__", UPDATE_TICKS = 600, UPDATE_FIRST = 30;
+function checkForUpdate() {
+  var r = new XMLHttpRequest();
+  r.open("GET", freshUrl("u"), true);
+  r.onreadystatechange = function () {
+    if (r.readyState !== 4 || r.status !== 200) { return; }
+    var m = /PANEL_VERSION = "([0-9a-f]{8,})"/.exec(r.responseText || "");
+    if (m && m[1] !== PANEL_VERSION) { renewCache(); }
+  };
+  r.send(null);
+}
+/* A frame the frontend rebuilds, or a reboot, opens the page at its plain
+   address, which the browser keeps for 31 days: fetch that address past the
+   cache first, so the kept copy is the new one, then load the new page. */
+function renewCache() {
+  var r = new XMLHttpRequest(), m = /[?&](panel=[a-z0-9_]+)/.exec(location.search || ""), done = false;
+  function go() { if (!done) { done = true; location.replace(freshUrl("b")); } }
+  r.open("GET", location.pathname + (m ? "?" + m[1] : ""), true);
+  r.setRequestHeader("Cache-Control", "no-cache");
+  r.onreadystatechange = function () { if (r.readyState === 4) { go(); } };
+  setTimeout(go, 8000);
+  r.send(null);
+}
+
+/* Each second the countdown; every 2 s the fast entities (slow ones every
+   fifth poll); each weather card's forecast every 20 min. A rejected token
+   gets one request every 5 min and nothing else: each 401 counts as a
+   failed login in Home Assistant, and enough of them get the panel's address
+   banned. */
+/* One reading to learn whether the token works: the first thing polled. */
+function probe() {
+  var k = FAST[0] || SLOW[0];
+  if (k) { fetchStates([k]); }
+}
+function tick() {
+  var t = now(), i, f;
+  if (BRIDGE) {
+    /* Reading the frontend's states costs nothing: every tick, everything,
+       and the quick settings while their page is open. */
+    fetchStates(FAST.concat(SLOW, page === "settings" ? SKEYS : []));
+    if (ticks === UPDATE_FIRST || ticks % UPDATE_TICKS === UPDATE_TICKS - 1) { checkForUpdate(); }
+    for (i = 0; i < wxEnts.length && lastOk; i++) {
+      f = fcOf(wxEnts[i]);
+      if (!f.busy && t >= f.due) { fetchForecast(wxEnts[i]); }
+    }
+  } else if (TOKEN || PREVIEW) {
+    if (rejected) {
+      if (ticks % REJECTED_TICKS === 0 && inflight === 0) { probe(); }
+    } else if (!lastOk) {
+      /* Until the token has worked once, one request at a time. */
+      if (ticks % POLL_TICKS === 0 && inflight === 0) { probe(); }
+    } else if (ticks % POLL_TICKS === 0 && inflight === 0) {
+      fetchStates(polls % SLOW_EVERY === 0 ? FAST.concat(SLOW) : FAST);
+      polls++;
+    }
+    if (!PREVIEW && (ticks === UPDATE_FIRST || ticks % UPDATE_TICKS === UPDATE_TICKS - 1)) { checkForUpdate(); }
+    for (i = 0; i < wxEnts.length && !rejected && lastOk; i++) {
+      f = fcOf(wxEnts[i]);
+      if (!f.busy && t >= f.due) { fetchForecast(wxEnts[i]); }
+    }
+  }
+  
+  ticks++;
+  paint();
+}
+
+/* Scroll a pixel so the stock browser tucks its address bar away. */
+function hideBar() { window.scrollTo(0, 1); }
+window.addEventListener("load", function () { setTimeout(hideBar, 0); setTimeout(hideBar, 300); }, false);
+
+/* A draft from the editor around the preview: shown, never kept. */
+if (PREVIEW) {
+  window.addEventListener("message", function (e) {
+    var d = e.data, lay;
+    if (e.source !== window.parent) { return; }
+    if (typeof d === "string") { try { d = JSON.parse(d); } catch (x) { return; } }
+    if (!d || d.type !== "panel-layout") { return; }
+    lay = checkLayout(d.layout);
+    if (lay) { useLayout(lay); }
+    
+    paint();
+  }, false);
+}
+
+dialEl = document.querySelector("[data-dial]");
+arcEl = $("arc"); glowEl = $("glow"); knobEl = $("knob"); knobGEl = $("knobG");
+if (!PREVIEW) { loadLook(); }
+build();
+
+if (V.settings === "va") {
+  
+} else if (V.settings) { buildSettings(); } else { $("gear").style.display = "none"; }
+frameCamera();
+$("cmI").onload = fitCamera;
+useLayout(startLayout());
+tick();
+setInterval(tick, 1000);
+})();
+</script>
+</body>
+</html>

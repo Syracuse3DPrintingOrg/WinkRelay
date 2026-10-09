@@ -1,0 +1,99 @@
+{
+  "_readme": "Copy to config.json and edit. Entity ids under variant.layout are what the home screen shows; variant.ent are the panel's own helpers from homeassistant/packages/wink_panel.yaml. docs/5-wall-dashboard.md explains each key.",
+  "out": "bathroom-panel.html",
+  "title": "Bathroom",
+  "variant": {
+    "settings": true,
+    "va": false,
+    "bridge": false,
+    "keys": {
+      "token": "bathroomPanelToken",
+      "layout": "bathroomPanelLayout",
+      "look": "bathroomPanelLook"
+    },
+    "rowTop": 348,
+    "rowEnd": 788,
+    "layout": {
+      "hero": {
+        "type": "fan_dial",
+        "fan": "fan.bathroom_fan",
+        "timer": "timer.bathroom_fan",
+        "script": "script.bathroom_fan_timer",
+        "steam": "input_number.bathroom_fan_steam_baseline"
+      },
+      "header": {
+        "motion": "binary_sensor.bathroom_motion"
+      },
+      "rows": [
+        {
+          "type": "fan_presets",
+          "minutes": [
+            15,
+            30,
+            60
+          ]
+        },
+        {
+          "type": "status",
+          "entity": "light.bathroom_vanity",
+          "label": "Vanity light",
+          "icon": "mirror",
+          "tap": "none"
+        },
+        {
+          "type": "sensors",
+          "cards": [
+            {
+              "kind": "temperature",
+              "entity": "sensor.bathroom_temperature",
+              "label": "Temperature",
+              "icon": "thermometer",
+              "baseline": null,
+              "rise": null
+            },
+            {
+              "kind": "humidity",
+              "entity": "sensor.bathroom_humidity",
+              "label": "Humidity",
+              "icon": "water-percent",
+              "baseline": "sensor.bathroom_humidity_baseline",
+              "rise": "sensor.bathroom_humidity_rise"
+            }
+          ]
+        },
+        {
+          "type": "weather",
+          "entity": "weather.home",
+          "label": "Outside"
+        }
+      ]
+    },
+    "ent": {
+      "fan": null,
+      "timer": null,
+      "script": null,
+      "steam": null,
+      "motion": null,
+      "weather": null,
+      "timers": null,
+      "layout": "sensor.bathroom_panel_layout",
+      "night": "binary_sensor.bathroom_panel_night",
+      "mode": "input_select.bathroom_panel_display_mode",
+      "theme": "input_select.bathroom_panel_theme",
+      "dayb": "input_number.bathroom_panel_day_brightness",
+      "nightb": "input_number.bathroom_panel_night_brightness",
+      "timeout": "input_number.bathroom_panel_screen_timeout",
+      "vdim": "input_boolean.bathroom_vanity_night_dim",
+      "vlevel": "input_number.bathroom_vanity_night_level",
+      "vstart": "input_datetime.bathroom_vanity_night_start",
+      "vend": "input_datetime.bathroom_vanity_night_end",
+      "fanlen": "input_number.bathroom_fan_default_minutes",
+      "auto": "input_boolean.bathroom_fan_steam_auto",
+      "vlink": "input_boolean.bathroom_fan_vanity_link",
+      "alert": "input_text.bathroom_panel_alert",
+      "daylight": "input_boolean.bathroom_panel_day_light",
+      "popup": null,
+      "sun": null
+    }
+  }
+}

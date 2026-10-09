@@ -1,0 +1,700 @@
+# Wink Relay as a bathroom fan switch: timed runs, the fan on steam, the two
+# wall buttons, and a vanity light on motion that dims at night.
+#
+# A Home Assistant package (docs/4-home-assistant.md), for a Relay whose
+# LOAD 1 runs the exhaust fan, published with the default discovery settings
+# (fan.bathroom_fan, sensor.bathroom_humidity). Load wink_panel.yaml too.
+# Before loading it, replace these with your own entities everywhere in this
+# file:
+#   binary_sensor.bathroom_motion   a motion sensor in the bathroom
+#   light.bathroom_vanity           the light the lower button controls
+# and, if you published discovery with another --prefix, the MQTT topics
+# starting with "Relay/".
+#
+# The humidity: the Relay's own sensor sits inside the wall box, and with the
+# fan running it misses most of a shower (docs/6-sensors-and-calibration.md).
+# It works as a start, but a sensor in the room's air does much better. If you
+# have one, change sensor.bathroom_humidity to it in "Bathroom Room Humidity"
+# below; everything else follows from that one sensor.
+#
+# None of the helpers has an `initial` value, so settings survive a restart.
+# Set them once from Settings > Devices & services > Helpers (the values used
+# on the panel this came from are given as comments).
+
+input_number:
+  bathroom_vanity_night_level:           # 10
+    name: Bathroom Vanity Night Level
+    min: 1
+    max: 50
+    step: 1
+    unit_of_measurement: "%"
+    icon: mdi:lightbulb-night-outline
+  bathroom_fan_default_minutes:          # 30
+    name: Bathroom Fan Default Minutes
+    min: 5
+    max: 60
+    step: 5
+    unit_of_measurement: min
+    icon: mdi:fan-clock
+  # The humidity baseline captured when steam turned the fan on; 0 when no
+  # steam run is in progress. The page shows "steam" while it is above 0.
+  bathroom_fan_steam_baseline:
+    name: Bathroom Fan Steam Baseline
+    icon: mdi:water-percent
+    min: 0
+    max: 100
+    step: 0.1
+    mode: box
+    unit_of_measurement: "%"
+  # Where the room was before the last steam run. In the hour after it, a
+  # second shower is measured against this; 0 means nothing will bring the
+  # fan back by itself.
+  bathroom_fan_last_steam_baseline:
+    name: Bathroom Fan Last Steam Baseline
+    icon: mdi:water-percent
+    min: 0
+    max: 100
+    step: 0.1
+    mode: box
+    unit_of_measurement: "%"
+
+input_boolean:
+  bathroom_vanity_night_dim:             # on
+    name: Bathroom Vanity Night Dim
+    icon: mdi:lightbulb-night
+  bathroom_fan_steam_auto:               # on
+    name: Bathroom Fan Steam Auto
+    icon: mdi:fan-auto
+  # The fan button lights the vanity too.
+  bathroom_fan_vanity_link:              # on
+    name: Bathroom Fan Vanity Link
+    icon: mdi:link-variant
+
+input_datetime:
+  bathroom_vanity_night_start:           # 23:30
+    name: Bathroom Vanity Night Start
+    has_date: false
+    has_time: true
+    icon: mdi:weather-night
+  bathroom_vanity_night_end:             # 07:00
+    name: Bathroom Vanity Night End
+    has_date: false
+    has_time: true
+    icon: mdi:weather-sunset-up
+  # The end of the hour after a steam run, while the room's rebound from wet
+  # towels and walls works its way into the one hour baseline.
+  bathroom_fan_steam_cooldown_until:
+    name: Bathroom Fan Steam Cooldown Until
+    icon: mdi:timer-sand
+    has_date: true
+    has_time: true
+
+timer:
+  # Every fan run's end time. The wall page reads finishes_at for its countdown.
+  bathroom_fan:
+    name: Bathroom Fan
+    icon: mdi:fan-clock
+    duration: "00:30:00"
+    restore: true
+
+template:
+  - sensor:
+      # The humidity the fan goes by. Point it at a sensor in the room's air
+      # if you have one.
+      - name: Bathroom Room Humidity
+        unique_id: wink_bathroom_room_humidity
+        state: "{{ states('sensor.bathroom_humidity') }}"
+        availability: "{{ has_value('sensor.bathroom_humidity') }}"
+        unit_of_measurement: "%"
+        device_class: humidity
+        state_class: measurement
+      # The rise over the room's own last hour.
+      - name: Bathroom Humidity Rise
+        unique_id: wink_bathroom_humidity_rise
+        state: >-
+          {{ (states('sensor.bathroom_room_humidity') | float
+              - states('sensor.bathroom_humidity_baseline') | float) | round(1) }}
+        availability: >-
+          {{ has_value('sensor.bathroom_room_humidity') and has_value('sensor.bathroom_humidity_baseline') }}
+        unit_of_measurement: "%"
+        state_class: measurement
+  - binary_sensor:
+      # Night dimming on and inside the night hours.
+      - name: Bathroom Vanity Night
+        unique_id: wink_bathroom_vanity_night
+        state: >-
+          {% set s = states('input_datetime.bathroom_vanity_night_start') %}
+          {% set e = states('input_datetime.bathroom_vanity_night_end') %}
+          {% set n = now().strftime('%H:%M:%S') %}
+          {% set inside = (n >= s or n < e) if s > e else (s <= n and n < e) %}
+          {{ is_state('input_boolean.bathroom_vanity_night_dim', 'on') and inside }}
+
+sensor:
+  # The room's usual humidity: a time-weighted average of the last hour.
+  # Time-weighted, not a median: the sensor reports every 0.1% change, so a
+  # shower is a burst of samples that would drag a per-sample median up to
+  # meet the steam within minutes.
+  - platform: statistics
+    name: Bathroom Humidity Baseline
+    unique_id: wink_bathroom_humidity_baseline
+    entity_id: sensor.bathroom_room_humidity
+    state_characteristic: average_step
+    max_age:
+      hours: 1
+    sampling_size: 1000
+    keep_last_sample: true
+    precision: 1
+
+script:
+  # Run the fan for `minutes`. The page's dial, its quick buttons and a tap
+  # on the fan call this. A timed run replaces a steam run.
+  bathroom_fan_timer:
+    alias: Bathroom fan timer
+    description: Run the bathroom fan for the chosen number of minutes, then turn it off.
+    icon: mdi:fan-clock
+    mode: restart
+    fields:
+      minutes:
+        name: Minutes
+        description: How long the fan should run.
+        required: true
+        default: 30
+        selector:
+          number:
+            min: 1
+            max: 120
+            unit_of_measurement: min
+            mode: box
+    sequence:
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.bathroom_fan_steam_baseline
+        data:
+          value: 0
+      # Timer first, fan second, so Bathroom.FanRuntime does not give this run
+      # the default length.
+      - action: timer.start
+        target:
+          entity_id: timer.bathroom_fan
+        data:
+          duration: "{{ (minutes | int(30)) * 60 }}"
+      - action: fan.turn_on
+        target:
+          entity_id: fan.bathroom_fan
+
+  # The upper button's double press. Add anything else in the room that
+  # should go off with it.
+  bathroom_all_off:
+    alias: Bathroom all off
+    description: Turns off the bathroom fan and the vanity light.
+    icon: mdi:power
+    mode: single
+    sequence:
+      - action: fan.turn_off
+        target:
+          entity_id: fan.bathroom_fan
+      - action: light.turn_off
+        target:
+          entity_id: light.bathroom_vanity
+
+automation:
+  # Every fan run gets an end time in timer.bathroom_fan, whoever started it,
+  # and the fan goes off when it is up. A fan switched off by any route ends
+  # the run. On start-up, and whenever the fan and the timer disagree for 30
+  # seconds, they are put back in step: a timer that ran out while Home
+  # Assistant was down finishes before automations listen, and a command to
+  # the Relay can be lost on weak Wi-Fi.
+  - id: wink_bathroom_fan_runtime
+    alias: Bathroom.FanRuntime
+    description: Gives every fan run an end time and keeps the fan and its timer in step.
+    mode: queued
+    max: 10
+    triggers:
+      - id: timer_done
+        trigger: event
+        event_type: timer.finished
+        event_data:
+          entity_id: timer.bathroom_fan
+      # No from-filter: at start-up the fan goes unknown -> off if it went off
+      # while Home Assistant was down, and that has to end the restored run.
+      - id: fan_off
+        trigger: state
+        entity_id: fan.bathroom_fan
+        to: "off"
+      - id: fan_on
+        trigger: state
+        entity_id: fan.bathroom_fan
+        to: "on"
+      - id: reconcile_start
+        trigger: homeassistant
+        event: start
+      - id: reconcile_fan_on
+        trigger: template
+        value_template: >-
+          {{ is_state('fan.bathroom_fan', 'on') and is_state('timer.bathroom_fan', 'idle') }}
+        for: "00:00:30"
+      - id: reconcile_fan_off
+        trigger: template
+        value_template: >-
+          {{ is_state('fan.bathroom_fan', 'off')
+             and states('timer.bathroom_fan') in ['active', 'paused'] }}
+        for: "00:00:30"
+    actions:
+      - choose:
+          - conditions:
+              - condition: trigger
+                id: timer_done
+            sequence:
+              - action: fan.turn_off
+                target:
+                  entity_id: fan.bathroom_fan
+              - action: input_number.set_value
+                target:
+                  entity_id: input_number.bathroom_fan_steam_baseline
+                data:
+                  value: 0
+          - conditions:
+              - condition: trigger
+                id: fan_off
+            sequence:
+              - action: timer.cancel
+                target:
+                  entity_id: timer.bathroom_fan
+              - action: input_number.set_value
+                target:
+                  entity_id: input_number.bathroom_fan_steam_baseline
+                data:
+                  value: 0
+          - conditions:
+              - condition: trigger
+                id: fan_on
+              - condition: state
+                entity_id: timer.bathroom_fan
+                state: idle
+            sequence:
+              - action: timer.start
+                target:
+                  entity_id: timer.bathroom_fan
+                data:
+                  duration: "{{ (states('input_number.bathroom_fan_default_minutes') | int(30)) * 60 }}"
+          - conditions:
+              - condition: trigger
+                id:
+                  - reconcile_start
+                  - reconcile_fan_on
+                  - reconcile_fan_off
+            sequence:
+              # After a restart the fan reads unknown until the Relay's
+              # retained state arrives over MQTT.
+              - wait_template: "{{ states('fan.bathroom_fan') in ['on', 'off'] }}"
+                timeout: "00:02:00"
+                continue_on_timeout: false
+              - choose:
+                  # Fan on, no run.
+                  - conditions:
+                      - condition: state
+                        entity_id: fan.bathroom_fan
+                        state: "on"
+                      - condition: state
+                        entity_id: timer.bathroom_fan
+                        state: idle
+                    sequence:
+                      - if:
+                          # The run already ended: the timer finished at
+                          # start-up, or the turn-off at its end was lost.
+                          - condition: state
+                            entity_id: timer.bathroom_fan
+                            attribute: last_transition
+                            state: finished
+                        then:
+                          - repeat:
+                              sequence:
+                                - action: fan.turn_off
+                                  target:
+                                    entity_id: fan.bathroom_fan
+                                - wait_template: "{{ is_state('fan.bathroom_fan', 'off') }}"
+                                  timeout: "00:00:20"
+                              until:
+                                - condition: template
+                                  value_template: "{{ is_state('fan.bathroom_fan', 'off') or repeat.index >= 5 }}"
+                          - action: input_number.set_value
+                            target:
+                              entity_id: input_number.bathroom_fan_steam_baseline
+                            data:
+                              value: 0
+                        else:
+                          # Switched on while nobody was watching: the usual run.
+                          - action: input_number.set_value
+                            target:
+                              entity_id: input_number.bathroom_fan_steam_baseline
+                            data:
+                              value: 0
+                          - action: timer.start
+                            target:
+                              entity_id: timer.bathroom_fan
+                            data:
+                              duration: "{{ (states('input_number.bathroom_fan_default_minutes') | int(30)) * 60 }}"
+                  # A run, but the fan is off.
+                  - conditions:
+                      - condition: state
+                        entity_id: fan.bathroom_fan
+                        state: "off"
+                      - condition: state
+                        entity_id: timer.bathroom_fan
+                        state:
+                          - active
+                          - paused
+                    sequence:
+                      - if:
+                          # While running, a turn-on never arrived: try once more.
+                          - condition: trigger
+                            id: reconcile_fan_off
+                        then:
+                          - action: fan.turn_on
+                            target:
+                              entity_id: fan.bathroom_fan
+                          - wait_template: "{{ is_state('fan.bathroom_fan', 'on') }}"
+                            timeout: "00:00:20"
+                      - if:
+                          - condition: state
+                            entity_id: fan.bathroom_fan
+                            state: "off"
+                        then:
+                          - action: timer.cancel
+                            target:
+                              entity_id: timer.bathroom_fan
+                          - action: input_number.set_value
+                            target:
+                              entity_id: input_number.bathroom_fan_steam_baseline
+                            data:
+                              value: 0
+                  # No run and the fan is off, but a steam run is still marked.
+                  - conditions:
+                      - condition: state
+                        entity_id: fan.bathroom_fan
+                        state: "off"
+                      - condition: state
+                        entity_id: timer.bathroom_fan
+                        state: idle
+                      - condition: numeric_state
+                        entity_id: input_number.bathroom_fan_steam_baseline
+                        above: 0
+                    sequence:
+                      - action: input_number.set_value
+                        target:
+                          entity_id: input_number.bathroom_fan_steam_baseline
+                        data:
+                          value: 0
+
+  # The fan on steam, off once the room is back near where it started.
+  #
+  # A fixed "above N%" rule does not work: a room's resting humidity moves
+  # with the house and the weather. What a shower does is push humidity well
+  # above wherever the room was, so the start is the rise over the last
+  # hour's average: above 5 points for a minute. Every number below is in
+  # points of relative humidity.
+  #
+  # Stop: "dry" is within 3 points of the baseline captured when the fan came
+  # on, held for 20 minutes, and never before the fan has run 30 minutes, so a
+  # long shower is not cut off halfway. timer.bathroom_fan caps every steam
+  # run at 60 minutes.
+  #
+  # After a run the room climbs back several points while the towels and
+  # walls dry. For the next hour the ordinary start waits; the fan comes back
+  # only if humidity stays 12 points above where the room was before the
+  # shower (a second shower does that, a rebound does not), once at most.
+  # When the hour is up the rise is checked once more, because a rise held
+  # back during the hour will not cross 5 again on its own.
+  #
+  # Turning the fan off by hand, or starting a timed run, ends the steam run
+  # and starts the same hour without the second chance.
+  - id: wink_bathroom_fan_steam
+    alias: Bathroom.FanSteam
+    description: Turns the fan on when humidity climbs well above the room's usual level, and off once the room is back.
+    mode: queued
+    max: 5
+    triggers:
+      - id: steam
+        trigger: numeric_state
+        entity_id: sensor.bathroom_humidity_rise
+        above: 5
+        for: "00:01:00"
+      - id: recheck
+        trigger: time
+        at: input_datetime.bathroom_fan_steam_cooldown_until
+      - id: steam_again
+        trigger: template
+        value_template: >-
+          {% set until = state_attr('input_datetime.bathroom_fan_steam_cooldown_until', 'timestamp') | float(0) %}
+          {% set ref = states('input_number.bathroom_fan_last_steam_baseline') | float(0) %}
+          {{ now().timestamp() < until and ref > 0 and is_state('fan.bathroom_fan', 'off')
+             and states('sensor.bathroom_room_humidity') | float(0) > ref + 12 }}
+        for: "00:01:00"
+      - id: dry
+        trigger: template
+        value_template: >-
+          {% set start = states('input_number.bathroom_fan_steam_baseline') | float(0) %}
+          {{ start > 0 and states('sensor.bathroom_room_humidity') | float(100) <= start + 3 }}
+        for: "00:20:00"
+      # A steam run has ended, by any route: FanRuntime and the fan timer
+      # script clear the steam baseline.
+      - id: ended
+        trigger: state
+        entity_id: input_number.bathroom_fan_steam_baseline
+    actions:
+      - choose:
+          - conditions:
+              - condition: trigger
+                id:
+                  - steam
+                  - recheck
+                  - steam_again
+              - condition: state
+                entity_id: input_boolean.bathroom_fan_steam_auto
+                state: "on"
+              # Already on a steam run: nothing to add.
+              - condition: numeric_state
+                entity_id: input_number.bathroom_fan_steam_baseline
+                below: 1
+              - condition: template
+                value_template: >-
+                  {{ trigger.id == 'steam_again'
+                     or (trigger.id == 'recheck'
+                         and states('sensor.bathroom_humidity_rise') | float(0) > 5)
+                     or (trigger.id == 'steam'
+                         and now().timestamp() >= state_attr('input_datetime.bathroom_fan_steam_cooldown_until', 'timestamp') | float(0)) }}
+            sequence:
+              # A second shower is measured from where the room was before the
+              # first one; any other start from the last hour.
+              - variables:
+                  start: >-
+                    {{ states('input_number.bathroom_fan_last_steam_baseline') | float
+                       if trigger.id == 'steam_again'
+                       else states('sensor.bathroom_humidity_baseline') | float }}
+              - action: input_number.set_value
+                target:
+                  entity_id: input_number.bathroom_fan_steam_baseline
+                data:
+                  value: "{{ start }}"
+              # A run started by a second shower uses the reference up, so the
+              # fan comes back by itself at most once.
+              - action: input_number.set_value
+                target:
+                  entity_id: input_number.bathroom_fan_last_steam_baseline
+                data:
+                  value: "{{ 0 if trigger.id == 'steam_again' else start }}"
+              # The 60 minute cap, started before the fan so FanRuntime does
+              # not put its default length on this run.
+              - action: timer.start
+                target:
+                  entity_id: timer.bathroom_fan
+                data:
+                  duration: "01:00:00"
+              - action: fan.turn_on
+                target:
+                  entity_id: fan.bathroom_fan
+
+          # Dry for 20 minutes: the run is over once the fan has run 30
+          # minutes. The hour after the run is set here, before the fan stops,
+          # so the "ended" branch below leaves it alone.
+          - conditions:
+              - condition: trigger
+                id: dry
+              - condition: state
+                entity_id: fan.bathroom_fan
+                state: "on"
+            sequence:
+              - variables:
+                  ran: >-
+                    {{ (now() - states.fan.bathroom_fan.last_changed).total_seconds() | int }}
+              - if:
+                  - condition: template
+                    value_template: "{{ ran < 1800 }}"
+                then:
+                  - action: input_datetime.set_datetime
+                    target:
+                      entity_id: input_datetime.bathroom_fan_steam_cooldown_until
+                    data:
+                      timestamp: "{{ now().timestamp() + (1800 - ran) + 3600 }}"
+                  - action: timer.start
+                    target:
+                      entity_id: timer.bathroom_fan
+                    data:
+                      duration: "{{ 1800 - ran }}"
+                else:
+                  - action: input_datetime.set_datetime
+                    target:
+                      entity_id: input_datetime.bathroom_fan_steam_cooldown_until
+                    data:
+                      timestamp: "{{ now().timestamp() + 3600 }}"
+                  - action: fan.turn_off
+                    target:
+                      entity_id: fan.bathroom_fan
+
+          # A steam run ended some other way: the 60 minute cap, or a person.
+          # The hour starts now. A run that reached the cap keeps its
+          # reference, so a second shower can still bring the fan back once;
+          # any other end drops it, so the fan stays the way the person left it.
+          - conditions:
+              - condition: trigger
+                id: ended
+              - condition: template
+                value_template: >-
+                  {{ trigger.from_state is not none and trigger.to_state is not none
+                     and trigger.from_state.state | float(0) > 0
+                     and trigger.to_state.state | float(0) == 0 }}
+              - condition: template
+                value_template: >-
+                  {{ state_attr('input_datetime.bathroom_fan_steam_cooldown_until', 'timestamp') | float(0)
+                     < now().timestamp() + 3540 }}
+            sequence:
+              - action: input_datetime.set_datetime
+                target:
+                  entity_id: input_datetime.bathroom_fan_steam_cooldown_until
+                data:
+                  timestamp: "{{ now().timestamp() + 3600 }}"
+              - if:
+                  - condition: template
+                    value_template: >-
+                      {{ (now() - trigger.from_state.last_changed).total_seconds() < 3540 }}
+                then:
+                  - action: input_number.set_value
+                    target:
+                      entity_id: input_number.bathroom_fan_last_steam_baseline
+                    data:
+                      value: 0
+
+  # The two wall buttons.
+  # Upper (the fan, relay_upper_flags=7): press = fan on or off, switched by
+  # the Relay itself so it works with Home Assistant down; if that turned the
+  # fan on and the vanity link is on, the vanity comes on too. Double press =
+  # everything off.
+  # Lower (the vanity, relay_lower_flags=6, needs Home Assistant): press =
+  # vanity on or off, at full or at the night level during the night hours;
+  # double press = the vanity between dim and full.
+  - id: wink_bathroom_panel_buttons
+    alias: Bathroom.PanelButtons
+    description: Upper button for the fan, lower button for the vanity light.
+    # Parallel: the upper branch can wait up to 3 seconds for the fan's new
+    # state, and a vanity press must never queue behind it.
+    mode: parallel
+    max: 10
+    triggers:
+      - id: upper
+        trigger: mqtt
+        topic: Relay/buttons/0/click/1
+        payload: "ON"
+      - id: upper_double
+        trigger: mqtt
+        topic: Relay/buttons/0/click/2
+        payload: "ON"
+      - id: lower
+        trigger: mqtt
+        topic: Relay/buttons/1/click/1
+        payload: "ON"
+      - id: lower_double
+        trigger: mqtt
+        topic: Relay/buttons/1/click/2
+        payload: "ON"
+    actions:
+      - variables:
+          night: "{{ is_state('binary_sensor.bathroom_vanity_night', 'on') }}"
+          dim: "{{ states('input_number.bathroom_vanity_night_level') | int(10) }}"
+          vanity_on: "{{ is_state('light.bathroom_vanity', 'on') }}"
+          vanity_pct: >-
+            {{ ((state_attr('light.bathroom_vanity', 'brightness') | int(0)) / 2.55) | round(0) | int
+               if is_state('light.bathroom_vanity', 'on') else 0 }}
+      - choose:
+          - conditions:
+              - condition: trigger
+                id: lower
+            sequence:
+              - if:
+                  - condition: template
+                    value_template: "{{ vanity_on }}"
+                then:
+                  - action: light.turn_off
+                    target:
+                      entity_id: light.bathroom_vanity
+                else:
+                  - action: light.turn_on
+                    target:
+                      entity_id: light.bathroom_vanity
+                    data:
+                      brightness_pct: "{{ dim if night else 100 }}"
+          - conditions:
+              - condition: trigger
+                id: lower_double
+            sequence:
+              - action: light.turn_on
+                target:
+                  entity_id: light.bathroom_vanity
+                data:
+                  brightness_pct: >-
+                    {{ (dim if vanity_pct > dim + 5 else 100) if vanity_on else (100 if night else dim) }}
+          - conditions:
+              - condition: trigger
+                id: upper
+              - condition: state
+                entity_id: input_boolean.bathroom_fan_vanity_link
+                state: "on"
+            sequence:
+              # Passes only if this press just turned the fan on.
+              - wait_template: >-
+                  {{ is_state('fan.bathroom_fan', 'on') and
+                     (now() - states.fan.bathroom_fan.last_changed).total_seconds() < 5 }}
+                timeout: "00:00:03"
+                continue_on_timeout: false
+              - action: light.turn_on
+                target:
+                  entity_id: light.bathroom_vanity
+                data:
+                  brightness_pct: "{{ dim if night else 90 }}"
+          - conditions:
+              - condition: trigger
+                id: upper_double
+            sequence:
+              - action: script.bathroom_all_off
+
+  # The vanity on with motion (full by day, the night level at night), off
+  # 500 s after the motion stops. It only turns the vanity on when it is off,
+  # so a level someone chose is kept, and it holds off for two minutes after
+  # "everything off" so walking out does not turn the light straight back on.
+  - id: wink_bathroom_vanity_motion
+    alias: Bathroom.VanityMotion
+    description: Turns the vanity on with motion (dim at night) and off 500 s after the motion stops.
+    mode: restart
+    max_exceeded: silent
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.bathroom_motion
+        from: "off"
+        to: "on"
+    conditions:
+      - condition: template
+        value_template: >-
+          {% set t = state_attr('script.bathroom_all_off', 'last_triggered') %}
+          {{ t is none or (now() - t).total_seconds() > 120 }}
+    actions:
+      - if:
+          - condition: state
+            entity_id: light.bathroom_vanity
+            state: "off"
+        then:
+          - action: light.turn_on
+            target:
+              entity_id: light.bathroom_vanity
+            data:
+              brightness_pct: >-
+                {{ states('input_number.bathroom_vanity_night_level') | int(10)
+                   if is_state('binary_sensor.bathroom_vanity_night', 'on') else 100 }}
+      - wait_for_trigger:
+          - trigger: state
+            entity_id: binary_sensor.bathroom_motion
+            from: "on"
+            to: "off"
+      - delay:
+          seconds: 500
+      - action: light.turn_off
+        target:
+          entity_id: light.bathroom_vanity

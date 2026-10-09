@@ -1,2 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+# Scripts that run on the Relay's Android shell must keep LF endings.
+*.sh text eol=lf
+*.patch text eol=lf
+*.png binary

@@ -1,0 +1,844 @@
+diff -ruN --strip-trailing-cr a/TaskScheduler/TaskScheduler.cpp b/TaskScheduler/TaskScheduler.cpp
+--- a/TaskScheduler/TaskScheduler.cpp	2026-10-09 19:40:22.198083698 +0000
++++ b/TaskScheduler/TaskScheduler.cpp	2026-10-09 19:40:41.610084993 +0000
+@@ -40,6 +40,7 @@
+ 
+ TaskScheduler& TaskScheduler::Async(std::function<void()> const& callable)
+ {
++    std::lock_guard<std::mutex> lock(_asyncMutex);
+     _asyncHolder.push(callable);
+     return *this;
+ }
+@@ -48,6 +49,7 @@
+ {
+     /// Clear the task holder
+     _task_holder.Clear();
++    std::lock_guard<std::mutex> lock(_asyncMutex);
+     _asyncHolder = AsyncHolder();
+     return *this;
+ }
+@@ -81,15 +83,30 @@
+     if (!_predicate())
+         return;
+ 
+-    // Process all asyncs
+-    while (!_asyncHolder.empty())
++    // Process all asyncs. Take them out under the lock and run them without
++    // it, so a callable can queue more work without deadlocking.
++    AsyncHolder pending;
+     {
+-        _asyncHolder.front()();
+-        _asyncHolder.pop();
++        std::lock_guard<std::mutex> lock(_asyncMutex);
++        std::swap(pending, _asyncHolder);
++    }
++    while (!pending.empty())
++    {
++        pending.front()();
++        pending.pop();
+ 
+-        // If the validation failed abort the dispatching here.
++        // If the validation failed abort the dispatching here, keeping what
++        // was not run for the next tick.
+         if (!_predicate())
++        {
++            std::lock_guard<std::mutex> lock(_asyncMutex);
++            while (!pending.empty())
++            {
++                _asyncHolder.push(pending.front());
++                pending.pop();
++            }
+             return;
++        }
+     }
+ 
+     while (!_task_holder.IsEmpty())
+diff -ruN --strip-trailing-cr a/TaskScheduler/TaskScheduler.hpp b/TaskScheduler/TaskScheduler.hpp
+--- a/TaskScheduler/TaskScheduler.hpp	2026-10-09 19:40:22.198083698 +0000
++++ b/TaskScheduler/TaskScheduler.hpp	2026-10-09 19:40:41.610084993 +0000
+@@ -202,6 +202,10 @@
+     /// the next update tick.
+     AsyncHolder _asyncHolder;
+ 
++    /// Async() is called from the MQTT client's threads while the looper
++    /// thread drains the queue, so the queue needs a lock.
++    std::mutex _asyncMutex;
++
+     predicate_t _predicate;
+ 
+     static bool EmptyValidator()
+diff -ruN --strip-trailing-cr a/wink_manager.cpp b/wink_manager.cpp
+--- a/wink_manager.cpp	2026-10-09 19:40:22.203083698 +0000
++++ b/wink_manager.cpp	2026-10-09 19:40:41.600084992 +0000
+@@ -20,6 +20,13 @@
+ #define MQTT_HUMIDITY_TOPIC_FORMAT "%s/sensors/humidity"
+ #define MQTT_SCREEN_STATE_TOPIC_FORMAT "%s/screen/state"
+ #define MQTT_PROXIMITY_TRIGGER_TOPIC_FORMAT "%s/proximity/trigger"
++// Added for Home Assistant: raw sensor levels, presence and availability
++#define MQTT_PROXIMITY_LEVEL_TOPIC_FORMAT "%s/sensors/proximity"
++#define MQTT_PROXIMITY_C_LEVEL_TOPIC_FORMAT "%s/sensors/proximity_c"
++#define MQTT_PRESENCE_TOPIC_FORMAT "%s/proximity/state"
++#define MQTT_LIGHT_TOPIC_FORMAT "%s/sensors/light"
++#define MQTT_LIGHT_IR_TOPIC_FORMAT "%s/sensors/light_ir"
++#define MQTT_STATUS_TOPIC_SUFFIX "/status"
+ 
+ void _onConnectFailure(void* context, MQTTAsync_failureData* response);
+ void _onConnected(void* context, char* cause);
+@@ -45,6 +52,10 @@
+   bool hideStatusBar = true;
+   bool sendScreenState = false;
+   bool sendProximityTrigger = false;
++  bool sendProximityLevel = false;
++  bool sendPresence = false;
++  bool sendLightLevel = false;
++  bool sendAvailability = false;
+   short relayFlags[2] = { RELAY_FLAG_SEND_CLICK | RELAY_FLAG_SEND_HELD, RELAY_FLAG_SEND_CLICK | RELAY_FLAG_SEND_HELD };
+ };
+ 
+@@ -56,8 +67,56 @@
+   MQTTAsync m_mqttClient;
+   std::map<std::string, MessageFunction> m_messageCallbacks;
+   std::shared_ptr<spdlog::logger> log;
++  // Last will: kept for the life of the process because paho reconnects with it.
++  std::string m_statusTopic;
++  MQTTAsync_willOptions m_will = MQTTAsync_willOptions_initializer;
++
++  void sendInt(const char* format, int value) {
++    char topic[256] = {0};
++    snprintf(topic, sizeof(topic), format, m_config.mqttTopicPrefix.c_str());
++    char payload[32] = {0};
++    snprintf(payload, sizeof(payload), "%d", value);
++    sendPayload(topic, payload, true);
++  }
+ 
+ public:
++  void proximityLevelChanged(int value) {
++    if (m_config.sendProximityLevel) {
++      sendInt(MQTT_PROXIMITY_LEVEL_TOPIC_FORMAT, value);
++    }
++  }
++
++  void proximityCLevelChanged(int value) {
++    if (m_config.sendProximityLevel) {
++      sendInt(MQTT_PROXIMITY_C_LEVEL_TOPIC_FORMAT, value);
++    }
++  }
++
++  void presenceChanged(bool present) {
++    log->debug("Presence {}", present);
++    if (m_config.sendPresence) {
++      char topic[256] = {0};
++      snprintf(topic, sizeof(topic), MQTT_PRESENCE_TOPIC_FORMAT, m_config.mqttTopicPrefix.c_str());
++      sendPayload(topic, present ? "ON" : "OFF", true);
++    }
++  }
++
++  void lightLevelChanged(int value) {
++    if (m_config.sendLightLevel) {
++      sendInt(MQTT_LIGHT_TOPIC_FORMAT, value);
++    }
++  }
++
++  void relayLimitReached(int relay) {
++    log->info("Relay {} reached its time limit and was turned off", relay);
++  }
++
++  void lightIRLevelChanged(int value) {
++    if (m_config.sendLightLevel) {
++      sendInt(MQTT_LIGHT_IR_TOPIC_FORMAT, value);
++    }
++  }
++
+   void buttonClicked(int button, int count) {
+     log->debug("button {} clicked. {} clicks", button, count);
+     if ((m_config.relayFlags[button] & RELAY_FLAG_TOGGLE) && count == 1) {
+@@ -72,7 +131,7 @@
+     }
+     if (m_config.relayFlags[button] & RELAY_FLAG_SEND_CLICK) {
+       char topic[256] = {0};
+-      sprintf(topic, MQTT_BUTTON_TOPIC_FORMAT, m_config.mqttTopicPrefix.c_str(), button, MQTT_BUTTON_CLICK_ACTION, count);
++      snprintf(topic, sizeof(topic), MQTT_BUTTON_TOPIC_FORMAT, m_config.mqttTopicPrefix.c_str(), button, MQTT_BUTTON_CLICK_ACTION, count);
+       sendPayload(topic, "ON");
+     }
+   }
+@@ -80,7 +139,7 @@
+     log->debug("button {} held. {} clicks", button, count);
+     if (m_config.relayFlags[button] & RELAY_FLAG_SEND_HELD) {
+       char topic[256] = {0};
+-      sprintf(topic, MQTT_BUTTON_TOPIC_FORMAT, m_config.mqttTopicPrefix.c_str(), button, MQTT_BUTTON_HELD_ACTION, count);
++      snprintf(topic, sizeof(topic), MQTT_BUTTON_TOPIC_FORMAT, m_config.mqttTopicPrefix.c_str(), button, MQTT_BUTTON_HELD_ACTION, count);
+       sendPayload(topic, "ON");
+     }
+   }
+@@ -88,30 +147,30 @@
+     log->debug("button {} released. {} clicks", button, count);
+     if (m_config.relayFlags[button] & RELAY_FLAG_SEND_RELEASE) {
+       char topic[256] = {0};
+-      sprintf(topic, MQTT_BUTTON_TOPIC_FORMAT, m_config.mqttTopicPrefix.c_str(), button, MQTT_BUTTON_RELEASED_ACTION, count);
++      snprintf(topic, sizeof(topic), MQTT_BUTTON_TOPIC_FORMAT, m_config.mqttTopicPrefix.c_str(), button, MQTT_BUTTON_RELEASED_ACTION, count);
+       sendPayload(topic, "ON");
+     }
+   }
+ 
+   void relayStateChanged(int relay, bool state) {
+     char topic[256] = {0};
+-    sprintf(topic, MQTT_RELAY_STATE_TOPIC_FORMAT, m_config.mqttTopicPrefix.c_str(), relay);
++    snprintf(topic, sizeof(topic), MQTT_RELAY_STATE_TOPIC_FORMAT, m_config.mqttTopicPrefix.c_str(), relay);
+     sendPayload(topic, state ? "ON" : "OFF", true);
+   }
+ 
+   void temperatureChanged(float tempC) {
+     char topic[256] = {0};
+-    sprintf(topic, MQTT_TEMPERATURE_TOPIC_FORMAT, m_config.mqttTopicPrefix.c_str());
+-    char payload[10] = {0};
+-    sprintf(payload, "%f", tempC);
++    snprintf(topic, sizeof(topic), MQTT_TEMPERATURE_TOPIC_FORMAT, m_config.mqttTopicPrefix.c_str());
++    char payload[32] = {0};
++    snprintf(payload, sizeof(payload), "%f", tempC);
+     sendPayload(topic, payload, true);
+   }
+ 
+   void humidityChanged(float humidity) {
+     char topic[256] = {0};
+-    sprintf(topic, MQTT_HUMIDITY_TOPIC_FORMAT, m_config.mqttTopicPrefix.c_str());
+-    char payload[10] = {0};
+-    sprintf(payload, "%f", humidity);
++    snprintf(topic, sizeof(topic), MQTT_HUMIDITY_TOPIC_FORMAT, m_config.mqttTopicPrefix.c_str());
++    char payload[32] = {0};
++    snprintf(payload, sizeof(payload), "%f", humidity);
+     sendPayload(topic, payload, true);
+   }
+ 
+@@ -119,9 +178,9 @@
+     log->debug("Proximity triggered {}", p);
+     if (m_config.sendProximityTrigger) {
+         char topic[256] = {0};
+-        sprintf(topic, MQTT_PROXIMITY_TRIGGER_TOPIC_FORMAT, m_config.mqttTopicPrefix.c_str());
+-        char payload[10] = {0};
+-        sprintf(payload, "%d", p);
++        snprintf(topic, sizeof(topic), MQTT_PROXIMITY_TRIGGER_TOPIC_FORMAT, m_config.mqttTopicPrefix.c_str());
++        char payload[32] = {0};
++        snprintf(payload, sizeof(payload), "%d", p);
+         sendPayload(topic, payload, false);
+     }
+   }
+@@ -130,7 +189,7 @@
+     log->debug("Screen state changed {}", state);
+     if (m_config.sendScreenState) {
+         char topic[256] = {0};
+-        sprintf(topic, MQTT_SCREEN_STATE_TOPIC_FORMAT, m_config.mqttTopicPrefix.c_str());
++        snprintf(topic, sizeof(topic), MQTT_SCREEN_STATE_TOPIC_FORMAT, m_config.mqttTopicPrefix.c_str());
+         sendPayload(topic, state ? "ON" : "OFF", true);
+     }
+   }
+@@ -151,6 +210,9 @@
+       qos[i++] = 0;
+     }
+     MQTTAsync_subscribeMany(m_mqttClient, topicCount, topics, qos, nullptr);
++    if (m_config.sendAvailability) {
++      sendPayload(m_statusTopic.c_str(), "online", true);
++    }
+     m_relay.resetState(); // trigger fresh state events on next loop
+   }
+ 
+@@ -177,6 +239,11 @@
+   }
+ 
+   bool processStatePayload(const char* payload, int len, bool& state) {
++    // An empty payload is how a retained topic is cleared; strncmp over zero
++    // bytes matches anything, so without this it read as "on".
++    if (len <= 0) {
++      return false;
++    }
+     if (strncmp(payload, "1", len) == 0 || strncasecmp(payload, "ON", len) == 0 || strncasecmp(payload, "true", len) == 0) {
+       state = true;
+       return true;
+@@ -208,6 +275,16 @@
+       if (t > 0) {
+         m_relay.setProximityThreshold(t);
+       }
++    } else if (strcmp(name, "proximity_rise") == 0) {
++      int r = atoi(value);
++      if (r > 0) {
++        m_relay.setProximityRise(r);
++      }
++    } else if (strcmp(name, "proximity_follow") == 0) {
++      int n = atoi(value);
++      if (n >= 8 && n <= 4096) {
++        m_relay.setProximityFollow(n);
++      }
+     } else if (strcmp(name, "temperature_threshold") == 0) {
+       int t = atoi(value);
+       if (t > 99) {
+@@ -247,6 +324,52 @@
+       bool state = false;
+       processStatePayload(value, strlen(value), state);
+       m_config.sendScreenState = state;
++    } else if (strcmp(name, "send_proximity_level") == 0) {
++      bool state = false;
++      processStatePayload(value, strlen(value), state);
++      m_config.sendProximityLevel = state;
++    } else if (strcmp(name, "proximity_report_delta") == 0) {
++      int d = atoi(value);
++      if (d > 0) {
++        m_relay.setProximityReportDelta(d);
++      }
++    } else if (strcmp(name, "send_presence") == 0) {
++      bool state = false;
++      processStatePayload(value, strlen(value), state);
++      m_config.sendPresence = state;
++    } else if (strcmp(name, "presence_off_delay") == 0) {
++      int s = atoi(value);
++      if (s > 0) {
++        m_relay.setPresenceOffDelay(s);
++      }
++    } else if (strcmp(name, "send_light_level") == 0) {
++      bool state = false;
++      processStatePayload(value, strlen(value), state);
++      m_config.sendLightLevel = state;
++      m_relay.setAmbientLightEnabled(state);
++    } else if (strcmp(name, "light_report_delta") == 0) {
++      int d = atoi(value);
++      if (d > 0) {
++        m_relay.setLightReportDelta(d);
++      }
++    } else if (strcmp(name, "relay_upper_max_on") == 0) {
++      m_relay.setRelayMaxOn(0, atoi(value));
++    } else if (strcmp(name, "relay_lower_max_on") == 0) {
++      m_relay.setRelayMaxOn(1, atoi(value));
++    } else if (strcmp(name, "click_window_ms") == 0) {
++      int ms = atoi(value);
++      if (ms >= 100 && ms <= 1000) {
++        m_relay.setClickWindow(ms);
++      }
++    } else if (strcmp(name, "screen_brightness") == 0) {
++      int p = atoi(value);
++      if (p >= 1 && p <= 100) {
++        m_relay.setScreenBrightness(p);
++      }
++    } else if (strcmp(name, "send_availability") == 0) {
++      bool state = false;
++      processStatePayload(value, strlen(value), state);
++      m_config.sendAvailability = state;
+     } else if (strcmp(name, "debug") == 0) {
+       if (strcmp(value, "true") == 0) {
+         spdlog::set_level(spdlog::level::debug);
+@@ -271,6 +394,31 @@
+     }
+   }
+ 
++  int payloadInt(MQTTAsync_message* msg) {
++    char buf[16] = {0};
++    int len = msg->payloadlen < (int)sizeof(buf) - 1 ? msg->payloadlen : (int)sizeof(buf) - 1;
++    if (len > 0) {
++      memcpy(buf, msg->payload, len);
++    }
++    return atoi(buf);
++  }
++
++  // Relay/screen/brightness: backlight percent, 1..100 (retained by HA).
++  void handleBrightnessMessage(MQTTAsync_message* msg) {
++    int p = payloadInt(msg);
++    if (p >= 1 && p <= 100) {
++      m_relay.setScreenBrightness(p);
++    }
++  }
++
++  // Relay/screen/timeout: seconds the screen stays on after a wake (retained by HA).
++  void handleTimeoutMessage(MQTTAsync_message* msg) {
++    int s = payloadInt(msg);
++    if (s >= 5 && s <= 3600) {
++      m_relay.updateScreenTimeout(s);
++    }
++  }
++
+   void handleRebootMessage(MQTTAsync_message* msg) {
+     reboot(LINUX_REBOOT_CMD_RESTART);
+   }
+@@ -292,6 +440,8 @@
+     m_messageCallbacks.emplace(m_config.mqttTopicPrefix + "/relays/0", std::bind(&WinkRelayManager::handleRelayMessage, this, 0, std::placeholders::_1));
+     m_messageCallbacks.emplace(m_config.mqttTopicPrefix + "/relays/1", std::bind(&WinkRelayManager::handleRelayMessage, this, 1, std::placeholders::_1));
+     m_messageCallbacks.emplace(m_config.mqttTopicPrefix + "/screen", std::bind(&WinkRelayManager::handleScreenMessage, this, std::placeholders::_1));
++    m_messageCallbacks.emplace(m_config.mqttTopicPrefix + "/screen/brightness", std::bind(&WinkRelayManager::handleBrightnessMessage, this, std::placeholders::_1));
++    m_messageCallbacks.emplace(m_config.mqttTopicPrefix + "/screen/timeout", std::bind(&WinkRelayManager::handleTimeoutMessage, this, std::placeholders::_1));
+ 
+     // commands
+     m_messageCallbacks.emplace(m_config.mqttTopicPrefix + "/command/reboot", std::bind(&WinkRelayManager::handleRebootMessage, this, std::placeholders::_1));
+@@ -307,6 +457,15 @@
+     conn_opts.onFailure = _onConnectFailure;
+     conn_opts.context = this;
+     conn_opts.automaticReconnect = 1;
++    if (m_config.sendAvailability) {
++      // The broker publishes "offline" for us if the connection drops.
++      m_statusTopic = m_config.mqttTopicPrefix + MQTT_STATUS_TOPIC_SUFFIX;
++      m_will.topicName = m_statusTopic.c_str();
++      m_will.message = "offline";
++      m_will.retained = 1;
++      m_will.qos = 1;
++      conn_opts.will = &m_will;
++    }
+     if (!m_config.mqttUsername.empty()) {
+       conn_opts.username = m_config.mqttUsername.c_str();
+     }
+@@ -355,6 +514,9 @@
+ 
+ int _messageArrived(void* context, char* topicName, int topicLen, MQTTAsync_message* message) {
+   ((WinkRelayManager*)context)->messageArrived(topicName, topicLen, message);
++  // Returning true hands both back to us; upstream never freed them.
++  MQTTAsync_freeMessage(&message);
++  MQTTAsync_free(topicName);
+   return true;
+ }
+ 
+diff -ruN --strip-trailing-cr a/wink_relay.h b/wink_relay.h
+--- a/wink_relay.h	2026-10-09 19:40:22.203083698 +0000
++++ b/wink_relay.h	2026-10-09 19:40:41.600084992 +0000
+@@ -21,6 +21,8 @@
+ #define PROXIMITY_INPUT_EVENTS "/dev/input/event3"
+ #define	TEMPERATURE_DATA "/sys/bus/i2c/devices/2-0040/temp1_input"
+ #define HUMIDITY_DATA "/sys/bus/i2c/devices/2-0040/humidity1_input"
++#define BACKLIGHT_BRIGHTNESS "/sys/class/backlight/pwm-backlight.0/brightness"
++#define BACKLIGHT_MAX "/sys/class/backlight/pwm-backlight.0/max_brightness"
+ 
+ struct RelayCallbacks {
+   virtual void buttonClicked(int button, int clicks) = 0;
+@@ -33,6 +35,13 @@
+   virtual void proximityTriggered(int p) = 0;
+   virtual void screenStateChanged(bool state) = 0;
+   virtual void touchInputGrabbed(bool state) = 0;
++  // Sensor reports added for Home Assistant; each fires only on a real change.
++  virtual void proximityLevelChanged(int value) {}
++  virtual void proximityCLevelChanged(int value) {}
++  virtual void presenceChanged(bool present) {}
++  virtual void lightLevelChanged(int value) {}
++  virtual void lightIRLevelChanged(int value) {}
++  virtual void relayLimitReached(int relay) {}
+   virtual ~RelayCallbacks() = default;
+ };
+ 
+@@ -69,6 +78,18 @@
+     m_proximityThreshold = t;
+   }
+ 
++  // Rise above a slowly tracking baseline that counts as "near" (0 = use the
++  // fixed proximity_threshold instead).
++  void setProximityRise(int r) {
++    m_proximityRise = r;
++  }
++
++  // How fast that baseline follows while nothing is near: each reading moves
++  // it 1/n of the way there (two readings a second).
++  void setProximityFollow(int n) {
++    m_proximityFollow = n;
++  }
++
+   void setTemperatureThreshold(int t) {
+     m_temperatureThreshold = t;
+   }
+@@ -77,6 +98,23 @@
+     m_humidityThreshold = t;
+   }
+ 
++  // Ambient light is only read when enabled (the input devices stay closed otherwise).
++  void setAmbientLightEnabled(bool enabled) {
++    m_ambientLightEnabled = enabled;
++  }
++
++  void setLightReportDelta(int d) {
++    m_lightReportDelta = d;
++  }
++
++  void setProximityReportDelta(int d) {
++    m_proximityReportDelta = d;
++  }
++
++  void setPresenceOffDelay(int sec) {
++    m_presenceOffDelay = std::chrono::seconds(sec);
++  }
++
+   void start(bool async) {
+     using namespace std::chrono_literals;
+     if (!m_started) {
+@@ -85,6 +123,9 @@
+       // Check Relay On/Off state and temp/humidity every 500ms
+       m_scheduler.Schedule(500ms, [this] (tsc::TaskContext c) {
+         checkRelayStates();
++        // Also the screen: its start-up "on" goes out before MQTT connects,
++        // and a reconnect clears the last state, so re-read it here.
++        checkScreenState();
+         // Temperature
+         char buf[10] = {0}; // for re-use
+         if (checkValue(m_temperatureFd, buf, sizeof(buf), m_temperatureThreshold, m_lastTemperature) && m_cb) {
+@@ -111,12 +152,54 @@
+         auto fd = m_relayFds[relay];
+         lseek(fd, 0, SEEK_SET);
+         write(fd, enabled ? "1":"0", 1);
++        if (enabled) {
++          // A fresh "on" restarts the time limit, even when already on.
++          scheduleRelayLimit(relay);
++        } else {
++          m_scheduler.CancelGroup(RELAY_0_LIMIT + relay);
++          m_relayLimitArmed[relay] = false;
++        }
+       });
+       return true;
+     }
+     return false;
+   }
+ 
++  // Longest a relay may stay on without a fresh "on", in seconds (0 = no
++  // limit). The daemon enforces it itself, so it holds with Home Assistant
++  // or the broker down, when only the wall button can turn a load on.
++  void setRelayMaxOn(int relay, int sec) {
++    if (relay == 0 || relay == 1) {
++      m_relayMaxOn[relay] = sec > 0 ? sec : 0;
++    }
++  }
++
++  // How long after a release to wait for another press before reporting
++  // the click count (upstream: 150 ms, tight for a double press).
++  void setClickWindow(int ms) {
++    m_clickWindow = std::chrono::milliseconds(ms);
++  }
++
++  // Backlight level in percent (1..100), applied now if the screen is on
++  // and again every time it turns on. Until one is set the backlight is
++  // left to Android.
++  void setScreenBrightness(int pct) {
++    m_scheduler.Async([this, pct]() {
++      m_screenBrightness = pct;
++      checkScreenState();
++      if (m_screenState == '1') {
++        applyBrightness();
++      }
++    });
++  }
++
++  // The screen timeout, changeable while running; used from the next wake.
++  void updateScreenTimeout(int sec) {
++    m_scheduler.Async([this, sec]() {
++      m_screenTimeout = std::chrono::seconds(sec);
++    });
++  }
++
+   bool toggleRelay(int relay) {
+     if (relay == 0 || relay == 1) {
+       m_scheduler.Async([this, relay] () {
+@@ -132,6 +215,12 @@
+           state = '0';
+         }
+         write(fd, &state, 1);
++        if (state == '1') {
++          scheduleRelayLimit(relay);
++        } else {
++          m_scheduler.CancelGroup(RELAY_0_LIMIT + relay);
++          m_relayLimitArmed[relay] = false;
++        }
+       });
+       return true;
+     }
+@@ -181,8 +270,34 @@
+   // Config
+   std::chrono::seconds m_screenTimeout;
+   int m_proximityThreshold = 5000;
++  int m_proximityRise = 0;
++  int m_proximityFollow = 256;
++  int m_relayMaxOn[2] = {0, 0};
++  bool m_relayLimitArmed[2] = {false, false};
++  std::chrono::milliseconds m_clickWindow = std::chrono::milliseconds(150);
++  int m_screenBrightness = -1;
++  int m_backlightMax = 0;
++  double m_proximityBaseline = -1;
+   int m_temperatureThreshold = 100;
+   int m_humidityThreshold = 100;
++  bool m_ambientLightEnabled = false;
++  // The visible channel wanders +-20 counts in a dark room, so stay above that.
++  int m_lightReportDelta = 32;
++  int m_proximityReportDelta = 500;
++  std::chrono::seconds m_presenceOffDelay = std::chrono::seconds(5);
++  // Sensor report state (reset by clearStates so a reconnect re-sends everything)
++  using Clock = std::chrono::steady_clock;
++  int m_lastLight;
++  int m_lastLightIR;
++  int m_lastProximityReported;
++  int m_lastProximityCReported;
++  Clock::time_point m_lastLightReport;
++  Clock::time_point m_lastLightIRReport;
++  Clock::time_point m_lastProximityReport;
++  Clock::time_point m_lastProximityCReport;
++  bool m_present = false;
++  bool m_presenceAnnounced = false;
++  Clock::time_point m_lastAboveThreshold;
+   // File Handles
+   int m_temperatureFd;
+   int m_humidityFd;
+@@ -201,9 +316,67 @@
+   enum SchedulerGroup {
+     BUTTON_0 = 0,
+     BUTTON_1,
+-    SCREEN
++    SCREEN,
++    RELAY_0_LIMIT,
++    RELAY_1_LIMIT
+   };
+ 
++  // (Re)start the relay's time limit; cancel it when there is none.
++  void scheduleRelayLimit(int relay) {
++    m_scheduler.CancelGroup(RELAY_0_LIMIT + relay);
++    m_relayLimitArmed[relay] = false;
++    if (m_relayMaxOn[relay] <= 0) {
++      return;
++    }
++    m_relayLimitArmed[relay] = true;
++    m_scheduler.Schedule(std::chrono::seconds(m_relayMaxOn[relay]), RELAY_0_LIMIT + relay,
++                         [this, relay] (tsc::TaskContext) {
++      m_relayLimitArmed[relay] = false;
++      auto fd = m_relayFds[relay];
++      lseek(fd, 0, SEEK_SET);
++      write(fd, "0", 1);
++      if (m_cb) {
++        m_cb->relayLimitReached(relay);
++      }
++      checkRelayStates();
++    });
++  }
++
++  int readIntFile(const char* path, int fallback) {
++    char buf[16] = {0};
++    int fd = open(path, O_RDONLY);
++    if (fd < 0) {
++      return fallback;
++    }
++    int n = read(fd, buf, sizeof(buf) - 1);
++    close(fd);
++    return n > 0 ? atoi(buf) : fallback;
++  }
++
++  void applyBrightness() {
++    if (m_screenBrightness <= 0) {
++      return;
++    }
++    if (m_backlightMax <= 0) {
++      m_backlightMax = readIntFile(BACKLIGHT_MAX, -1);
++    }
++    int max = m_backlightMax > 0 ? m_backlightMax : 255;
++    int level = m_screenBrightness * max / 100;
++    if (level < 1) {
++      level = 1;
++    }
++    if (level > max) {
++      level = max;
++    }
++    char buf[16] = {0};
++    int n = snprintf(buf, sizeof(buf), "%d", level);
++    int fd = open(BACKLIGHT_BRIGHTNESS, O_WRONLY);
++    if (fd >= 0) {
++      write(fd, buf, n);
++      close(fd);
++    }
++  }
++
+   void clearStates() {
+     m_lastTemperature = -1;
+     m_lastHumidity = -1;
+@@ -211,6 +384,29 @@
+     m_relayStates[0] = ' ';
+     m_relayStates[1] = ' ';
+     m_screenState = ' ';
++    // Far outside any real reading, so the next report always goes out.
++    m_lastLight = -1000000;
++    m_lastLightIR = -1000000;
++    m_lastProximityReported = -1000000;
++    m_lastProximityCReported = -1000000;
++    m_lastLightReport = Clock::time_point();
++    m_lastLightIRReport = Clock::time_point();
++    m_lastProximityReport = Clock::time_point();
++    m_lastProximityCReport = Clock::time_point();
++    m_presenceAnnounced = false;
++  }
++
++  // Report a level only when it moved by more than delta since the last
++  // report, and at most once a second, so a noisy sensor stays quiet.
++  bool levelChanged(int value, int delta, int& last, Clock::time_point& lastReport) {
++    using namespace std::chrono_literals;
++    auto now = Clock::now();
++    if (abs(value - last) > delta && now - lastReport >= 1s) {
++      last = value;
++      lastReport = now;
++      return true;
++    }
++    return false;
+   }
+ 
+   void handleButtonPress(int i) {
+@@ -245,8 +441,8 @@
+       s.clickCount = 0;
+     } else {
+       // TODO Check max clicks and send immediately
+-      m_scheduler.Schedule(150ms, i, [this, i, &s] (tsc::TaskContext) {
+-        // no more events after 150ms -> clicked
++      m_scheduler.Schedule(m_clickWindow, i, [this, i, &s] (tsc::TaskContext) {
++        // no more presses within the click window -> clicked
+         if (m_cb) {
+           m_cb->buttonClicked(i, s.clickCount);
+         }
+@@ -260,6 +456,17 @@
+     for (int i=0; i<2;++i) {
+       lseek(m_relayFds[i], 0, SEEK_SET);
+       if (read(m_relayFds[i], &state, 1) > 0) {
++        // Keep the time limit in step with what the relay is doing now, on
++        // every pass: armed while on, cancelled while off. Checking the state
++        // and not a change covers a relay switched back on in the moment the
++        // limit fired, and a reconnect (which resets m_relayStates) does not
++        // restart a limit that is already running.
++        if (m_relayMaxOn[i] > 0 && state == '1' && !m_relayLimitArmed[i]) {
++          scheduleRelayLimit(i);
++        } else if (state == '0' && m_relayLimitArmed[i]) {
++          m_scheduler.CancelGroup(RELAY_0_LIMIT + i);
++          m_relayLimitArmed[i] = false;
++        }
+         if (m_relayStates[i] != state) {
+           m_relayStates[i] = state;
+           if (m_cb) {
+@@ -306,6 +513,7 @@
+     m_scheduler.CancelGroup(SCREEN);
+     if (enabled) {
+       write(m_screenFd, "1", 1);
++      applyBrightness();
+       m_scheduler.Schedule(m_screenTimeout, SCREEN, [this] (tsc::TaskContext c) {
+         // turn off screen
+         write(m_screenFd, "0", 1);
+@@ -352,31 +560,97 @@
+       ++i;
+     });
+ 
+-    // only using led_a for now
+-    if (led_a >= m_proximityThreshold) {
++    if (i == 0) {
++      return; // nothing read this time
++    }
++
++    // Only led_a decides "near". With a fixed threshold, as upstream does;
++    // with proximity_rise, by how far led_a is above its own slowly tracked
++    // resting level. The resting level differs a lot between units (one
++    // rests near 44,000, far above the example threshold of 5,000) and
++    // drifts by more than a thousand counts over a day, while a hand near
++    // the glass adds a couple of thousand, so a fixed threshold is either
++    // always on or never on.
++    bool near;
++    if (m_proximityRise > 0) {
++      if (m_proximityBaseline < 0) {
++        m_proximityBaseline = led_a;
++      }
++      near = led_a - m_proximityBaseline >= m_proximityRise;
++      // At two reports a second, 1/256 (the default proximity_follow)
++      // follows drift within a few minutes. A bathroom fan's draught cools
++      // the sensor and climbs about 10 counts a second, which 1/256 trails
++      // by more than a thousand and reads as a hand; 1/64 keeps up with it
++      // while a hand still adds thousands at once. While something is near,
++      // 1/4096 keeps a hand from becoming the new normal, but something left
++      // in front for good still does, in time.
++      m_proximityBaseline += (led_a - m_proximityBaseline) / (near ? 4096.0 : (double) m_proximityFollow);
++    } else {
++      near = led_a >= m_proximityThreshold;
++    }
++
++    if (near) {
+       screenPower(true);
+       if (m_cb) {
+         m_cb->proximityTriggered(led_a);
+       }
+     }
++
++    if (m_cb && levelChanged(led_a, m_proximityReportDelta, m_lastProximityReported, m_lastProximityReport)) {
++      m_cb->proximityLevelChanged(led_a);
++    }
++    // led_c is the other driven channel (about 17,000 at rest on one unit).
++    // led_b sits at the ADC floor (about 256) on this board: no LED behind it.
++    if (i > 2 && m_cb && levelChanged(led_c, m_proximityReportDelta, m_lastProximityCReported, m_lastProximityCReport)) {
++      m_cb->proximityCLevelChanged(led_c);
++    }
++
++    // Presence: on as soon as something is near, off once nothing has been
++    // near for the off delay. Reported only when it changes.
++    auto now = Clock::now();
++    bool present = m_present;
++    if (near) {
++      m_lastAboveThreshold = now;
++      present = true;
++    } else if (m_present && now - m_lastAboveThreshold >= m_presenceOffDelay) {
++      present = false;
++    }
++    if (m_cb && (present != m_present || !m_presenceAnnounced)) {
++      m_present = present;
++      m_presenceAnnounced = true;
++      m_cb->presenceChanged(present);
++    }
+   }
+ 
+-  void processAmbientLightEvent(int fd, struct input_event* event) {
+-    consumeEvents(fd, event, [] (struct input_event* e) {
++  // Both light devices send one EV_ABS value per report; keep the newest.
++  int lastAbsValue(int fd, struct input_event* event) {
++    int value = -1;
++    consumeEvents(fd, event, [&value] (struct input_event* e) {
+       if (e->type == EV_ABS) {
+-        // printf("Got ambient light event %d\n", e->value);
++        value = e->value;
+       }
+-      // ignore others
+     });
++    return value;
++  }
++
++  // Light noise grows with the level, so the reporting step does too: the
++  // configured delta, or a tenth of the last reported value if that is bigger.
++  int lightDelta(int last) {
++    return last < 0 ? m_lightReportDelta : std::max(m_lightReportDelta, last / 10);
++  }
++
++  void processAmbientLightEvent(int fd, struct input_event* event) {
++    int value = lastAbsValue(fd, event);
++    if (value >= 0 && m_cb && levelChanged(value, lightDelta(m_lastLight), m_lastLight, m_lastLightReport)) {
++      m_cb->lightLevelChanged(value);
++    }
+   }
+ 
+   void processAmbientLightIREvent(int fd, struct input_event* event) {
+-    consumeEvents(fd, event, [] (struct input_event* e) {
+-      if (e->type == EV_ABS) {
+-        // printf("Got ambient light IR event %d\n", e->value);
+-      }
+-      // ignore others
+-    });
++    int value = lastAbsValue(fd, event);
++    if (value >= 0 && m_cb && levelChanged(value, lightDelta(m_lastLightIR), m_lastLightIR, m_lastLightIRReport)) {
++      m_cb->lightIRLevelChanged(value);
++    }
+   }
+ 
+   void looperThread() {
+@@ -389,8 +663,8 @@
+     const char* pollFiles[] = { BUTTON_0_GPIO"value", BUTTON_1_GPIO"value",
+                                 SCREEN_INPUT_EVENTS,
+                                 PROXIMITY_INPUT_EVENTS,
+-                                //AMBIENT_LIGHT_INPUT_EVENTS,
+-                                //AMBIENT_LIGHT_IR_INPUT_EVENTS
++                                AMBIENT_LIGHT_INPUT_EVENTS,
++                                AMBIENT_LIGHT_IR_INPUT_EVENTS
+                               };
+     int pollFileCount = sizeof(pollFiles) / sizeof(char*);
+     struct pollfd fdlist[pollFileCount];
+@@ -402,8 +676,10 @@
+     }
+ 
+     for (int i=2;i<pollFileCount; ++i) {
+-      // input events
+-      fdlist[i].fd = open(pollFiles[i], O_RDONLY | O_NONBLOCK);
++      // input events; poll() skips entries with a negative fd, which is how
++      // the light sensors stay unread unless they are enabled
++      bool isLight = (i == 4 || i == 5);
++      fdlist[i].fd = (isLight && !m_ambientLightEnabled) ? -1 : open(pollFiles[i], O_RDONLY | O_NONBLOCK);
+       fdlist[i].events = POLLIN;
+       fdlist[i].revents = 0;
+     }

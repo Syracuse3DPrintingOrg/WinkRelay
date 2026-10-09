@@ -1,0 +1,45 @@
+; /sdcard/wink_manager.ini on the Relay. Copy this file, fill in the broker,
+; and push it with device/install-daemon.sh <relay-ip> <your copy>.
+; Keys are explained in docs/mqtt-reference.md. Lines starting with ; are
+; comments.
+
+; The broker. Give the Relay a login of its own on the broker, not a Home
+; Assistant user: this file is readable by anything on the device.
+mqtt_clientid=Relay
+mqtt_topic_prefix=Relay
+mqtt_address=tcp://BROKER_ADDRESS:1883
+mqtt_username=wink_relay
+mqtt_password=CHANGE_ME
+
+; Buttons. Upper: toggle LOAD 1 locally (works with Home Assistant down),
+; report clicks and holds (1 + 2 + 4). Lower: report clicks and holds only
+; (2 + 4), so Home Assistant decides what it does. Use 7 for both if both
+; buttons should switch their own load.
+relay_upper_flags=7
+relay_lower_flags=6
+click_window_ms=250
+
+; Safety net: the Relay turns LOAD 1 off by itself after this many seconds
+; on without a fresh "on" command (0 = never). Useful for a fan.
+relay_upper_max_on=7200
+relay_lower_max_on=0
+
+; Screen.
+hide_status_bar=true
+screen_timeout=60
+send_screen_state=true
+
+; Sensors and presence (added by this repo's patch).
+send_light_level=true
+light_report_delta=40
+send_proximity_level=true
+proximity_report_delta=300
+send_presence=true
+presence_off_delay=10
+proximity_rise=600
+proximity_follow=64
+proximity_threshold=60000
+send_proximity_trigger=false
+
+; Online/offline with an MQTT last will (added by this repo's patch).
+send_availability=true

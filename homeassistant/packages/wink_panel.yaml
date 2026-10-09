@@ -1,0 +1,287 @@
+# Wink Relay wall panel: the display's settings, day and night, screen wake,
+# the alert banner, and a notice when the panel drops off the network.
+#
+# A Home Assistant package (docs/4-home-assistant.md). Before loading it,
+# replace these with your own entities everywhere in this file:
+#   binary_sensor.bathroom_motion   a motion sensor in the room
+#   light.bathroom_vanity           the room's main light
+# and, if you published discovery with another --prefix, the MQTT topics
+# starting with "Relay/".
+#
+# The page's quick settings change these helpers through the REST API with the
+# panel's own token; the automations below act on them. None of the helpers
+# has an `initial` value, on purpose: `initial` would put a setting back on
+# every restart. Set them once from Settings > Devices & services > Helpers
+# (the values used on the panel this came from are given as comments).
+
+input_select:
+  bathroom_panel_display_mode:
+    name: Bathroom Panel Display Mode
+    options: [Auto, Day, Night]          # Auto = night from sunset to sunrise
+    icon: mdi:theme-light-dark
+  bathroom_panel_theme:
+    name: Bathroom Panel Theme
+    options: [Neon, Ocean, Ember, Mono]
+    icon: mdi:palette
+
+input_number:
+  bathroom_panel_day_brightness:         # 80
+    name: Bathroom Panel Day Brightness
+    min: 10
+    max: 100
+    step: 5
+    unit_of_measurement: "%"
+    icon: mdi:brightness-7
+  bathroom_panel_night_brightness:       # 15
+    name: Bathroom Panel Night Brightness
+    min: 1
+    max: 60
+    step: 1
+    unit_of_measurement: "%"
+    icon: mdi:brightness-3
+  bathroom_panel_screen_timeout:         # 60
+    name: Bathroom Panel Screen Timeout
+    min: 15
+    max: 600
+    step: 5
+    mode: box
+    unit_of_measurement: s
+    icon: mdi:timer-sand
+
+input_boolean:
+  # The light look by day (the page is dark at night either way).
+  bathroom_panel_day_light:              # on
+    name: Bathroom Panel Day Light
+    icon: mdi:white-balance-sunny
+
+input_text:
+  # "level|title|message" (level alarm or info), empty when there is none.
+  # Written by script.bathroom_panel_alert, cleared by a tap on the banner.
+  bathroom_panel_alert:
+    name: Bathroom Panel Alert
+    min: 0
+    max: 255
+    icon: mdi:message-alert
+  # The tag of the alert on screen, so an alert can be cleared by its tag.
+  bathroom_panel_alert_tag:
+    name: Bathroom Panel Alert Tag
+    min: 0
+    max: 100
+    icon: mdi:tag-outline
+
+template:
+  - binary_sensor:
+      # The page's night look and the night backlight: always in Night mode,
+      # never in Day mode, sunset to sunrise in Auto.
+      - name: Bathroom Panel Night
+        unique_id: wink_panel_night
+        state: >-
+          {% set m = states('input_select.bathroom_panel_display_mode') %}
+          {{ m == 'Night' or (m != 'Day' and is_state('sun.sun', 'below_horizon')) }}
+
+script:
+  # Show an alert on the panel and wake its screen. An alarm (red, pulsing)
+  # stays until someone taps it; an info alert clears itself after `minutes`
+  # and never replaces an alarm that is still showing.
+  bathroom_panel_alert:
+    alias: Bathroom panel alert
+    description: Shows an alert banner on the bathroom wall panel and wakes its screen.
+    icon: mdi:message-alert
+    mode: restart
+    fields:
+      level:
+        name: Level
+        description: alarm (red, stays until cleared) or info (clears itself).
+        default: info
+        selector:
+          select:
+            options: [alarm, info]
+      title:
+        name: Title
+        required: true
+        selector:
+          text:
+      message:
+        name: Message
+        required: true
+        selector:
+          text:
+      tag:
+        name: Tag
+        description: A name for this alert, so it can be cleared by name later.
+        required: false
+        selector:
+          text:
+      minutes:
+        name: Minutes
+        description: For info alerts, how long before it clears itself (0 = stays).
+        default: 30
+        selector:
+          number:
+            min: 0
+            max: 240
+            mode: box
+    sequence:
+      - condition: template
+        value_template: >-
+          {{ level == 'alarm' or not states('input_text.bathroom_panel_alert').startswith('alarm|') }}
+      - variables:
+          text: >-
+            {% set t = level ~ '|' ~ (title | string | replace('|', '/')) ~ '|' ~ (message | string | replace('|', '/')) %}
+            {{ t[:255] }}
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.bathroom_panel_alert
+        data:
+          value: "{{ text }}"
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.bathroom_panel_alert_tag
+        data:
+          value: "{{ (tag | default('', true) | string)[:100] }}"
+      - action: mqtt.publish
+        data:
+          topic: Relay/screen
+          payload: "ON"
+      - if:
+          - condition: template
+            value_template: "{{ level != 'alarm' and (minutes | int(30)) > 0 }}"
+        then:
+          - delay:
+              minutes: "{{ minutes | int(30) }}"
+          # Only clear what this run put up.
+          - condition: template
+            value_template: "{{ states('input_text.bathroom_panel_alert') == text }}"
+          - action: input_text.set_value
+            target:
+              entity_id:
+                - input_text.bathroom_panel_alert
+                - input_text.bathroom_panel_alert_tag
+            data:
+              value: ""
+
+automation:
+  # The backlight level for day or night, and how long the screen stays on
+  # after a wake. Both retained, so the daemon picks them up again after a
+  # restart or a reconnect, and re-applies the level every time the screen
+  # turns on.
+  - id: wink_panel_display
+    alias: Bathroom.PanelDisplay
+    description: Sends the panel its day or night backlight level and its screen timeout.
+    mode: queued
+    max: 5
+    triggers:
+      - trigger: state
+        entity_id:
+          - binary_sensor.bathroom_panel_night
+          - input_number.bathroom_panel_day_brightness
+          - input_number.bathroom_panel_night_brightness
+          - input_number.bathroom_panel_screen_timeout
+      - trigger: homeassistant
+        event: start
+    actions:
+      - action: mqtt.publish
+        data:
+          topic: Relay/screen/brightness
+          retain: true
+          payload: >-
+            {{ states('input_number.bathroom_panel_night_brightness') | int(15)
+               if is_state('binary_sensor.bathroom_panel_night', 'on')
+               else states('input_number.bathroom_panel_day_brightness') | int(80) }}
+      - action: mqtt.publish
+        data:
+          topic: Relay/screen/timeout
+          retain: true
+          payload: "{{ states('input_number.bathroom_panel_screen_timeout') | int(60) }}"
+
+  # The Relay's proximity sensor only sees a hand within about 10 cm of the
+  # glass, never a person walking in, so the room's motion sensor and its
+  # light wake the screen instead, and keep it on while the room is in use.
+  # Relay/screen ON restarts the daemon's timeout, so it is repeated at half
+  # the timeout (at most every 30 s) and the screen never times out between.
+  - id: wink_panel_wake
+    alias: Bathroom.PanelWake
+    description: Turns the panel's screen on with motion or the light, and keeps it on while the room is in use.
+    mode: restart
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.bathroom_motion
+        to: "on"
+      - trigger: state
+        entity_id: light.bathroom_vanity
+        to: "on"
+      - trigger: homeassistant
+        event: start
+    conditions:
+      - condition: or
+        conditions:
+          - condition: state
+            entity_id: binary_sensor.bathroom_motion
+            state: "on"
+          - condition: state
+            entity_id: light.bathroom_vanity
+            state: "on"
+    actions:
+      - action: mqtt.publish
+        data:
+          topic: Relay/screen
+          payload: "ON"
+      - repeat:
+          while:
+            - condition: or
+              conditions:
+                - condition: state
+                  entity_id: binary_sensor.bathroom_motion
+                  state: "on"
+                - condition: state
+                  entity_id: light.bathroom_vanity
+                  state: "on"
+          sequence:
+            - delay:
+                seconds: >-
+                  {{ [[(states('input_number.bathroom_panel_screen_timeout') | int(60)) // 2, 5] | max, 30] | min }}
+            - action: mqtt.publish
+              data:
+                topic: Relay/screen
+                payload: "ON"
+
+  # A notice when the panel has been off the broker for 10 minutes (its MQTT
+  # last will marks it offline within about 15 seconds), taken back when it
+  # returns. Short drops such as a reboot are ignored.
+  - id: wink_panel_offline
+    alias: Bathroom.PanelOffline
+    description: Raises a notification when the wall panel has been offline for 10 minutes.
+    mode: queued
+    max: 5
+    triggers:
+      - id: down
+        trigger: state
+        entity_id: binary_sensor.bathroom_panel_connection
+        to: "off"
+        for: "00:10:00"
+      - id: up
+        trigger: state
+        entity_id: binary_sensor.bathroom_panel_connection
+        from: "off"
+        to: "on"
+    actions:
+      - choose:
+          - conditions:
+              - condition: trigger
+                id: down
+            sequence:
+              - action: persistent_notification.create
+                data:
+                  notification_id: bathroom_panel_offline
+                  title: Bathroom panel offline
+                  message: >-
+                    The bathroom wall panel has been offline since
+                    {{ as_local(trigger.from_state.last_changed if trigger.from_state else now()).strftime('%-I:%M %p') }}.
+                    Its wall buttons still switch its own loads.
+          - conditions:
+              - condition: trigger
+                id: up
+            sequence:
+              - action: persistent_notification.dismiss
+                data:
+                  notification_id: bathroom_panel_offline
