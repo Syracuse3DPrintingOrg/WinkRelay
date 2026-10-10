@@ -14,6 +14,8 @@ involved:
 - A bathroom fan package that switches the fan on with shower steam and off
   once the room is dry, plus timed runs, a motion-lit vanity light that dims
   at night, and the buttons wired to all of it.
+- Optionally, the Relay's own Zigbee radio, which other guides treat as
+  unusable, joins your existing Zigbee2MQTT or ZHA network as a router.
 
 ![The wall dashboard: home screen by day and at night, the humidity graph, and quick settings](docs/images/panel-screens.png)
 
@@ -29,6 +31,7 @@ the page's offline test harness with made-up readings.
 4. [Connect it to Home Assistant](docs/4-home-assistant.md): MQTT discovery and the packages.
 5. [Put the dashboard on the wall](docs/5-wall-dashboard.md): build the page, give it a token, and keep it on screen.
 6. [Sensors and calibration](docs/6-sensors-and-calibration.md): what the sensors can and cannot tell you.
+7. [Optional: make it a Zigbee router](docs/7-zigbee-router.md): put the built-in Zigbee radio to work in your mesh.
 
 Reference: [MQTT topics and daemon settings](docs/mqtt-reference.md),
 [home screen layouts](docs/layout.md), [troubleshooting](docs/troubleshooting.md).
@@ -40,6 +43,7 @@ Reference: [MQTT topics and daemon settings](docs/mqtt-reference.md),
 | `daemon/` | A patch for [wink-relay-manager](https://github.com/jimpastos/wink-relay-manager) 1.3 that adds the light, proximity and presence sensors, an MQTT last will, screen brightness and timeout from Home Assistant, a relay time limit and several crash fixes; a script that builds it; an example config |
 | `device/` | Scripts run from your computer over adb: install and roll back the daemon, set up the browser, load the panel's token, and a boot hook that keeps the dashboard on screen and the Wi-Fi responsive |
 | `homeassistant/` | The MQTT discovery publisher and two Home Assistant packages (the panel, and the bathroom fan) |
+| `zigbee/` | The router program that keeps the Relay's Zigbee radio on your network, a bridge and a script for the one-time join, and their build script |
 | `panel/` | The wall dashboard's source, its build script, an example config and an offline test harness |
 
 ## Licenses

@@ -23,6 +23,9 @@
 #     The stock browser never retries a page that failed to load, so a panel
 #     opened while Home Assistant (or Wi-Fi) was still starting would otherwise
 #     sit on an error page for good.
+#  4. Keeps /system/bin/zbrouter running, if it is installed: the host that
+#     puts the Relay's Zigbee radio back on its network as a router after
+#     every boot (docs/7-zigbee-router.md).
 #
 # Every open adds a throwaway ?b= query: Home Assistant serves /local/ with a
 # 31 day cache lifetime, and the browser would otherwise keep showing an old
@@ -88,6 +91,22 @@ ha_up() {
   wait $WP
 }
 
+ZB=/system/bin/zbrouter
+ZBPID=/data/local/tmp/zbrouter.pid
+
+# Start the Zigbee radio's host unless it is already running. Same pidfile
+# check as above: boot-time pids repeat.
+zb_check() {
+  [ -x $ZB ] || return
+  P=$(cat $ZBPID 2>/dev/null)
+  if [ -n "$P" ] && grep -q 'zbrouter' /proc/$P/cmdline 2>/dev/null; then
+    return
+  fi
+  $ZB < /dev/null > /dev/null 2>&1 &
+  echo $! > $ZBPID
+  log "zigbee router host started (pid $!)"
+}
+
 open_panel() {
   am start -a android.intent.action.VIEW -d "$URL?b=$(date +%s)" \
     -n com.android.browser/.BrowserActivity \
@@ -115,6 +134,7 @@ fi
 WAS_UP=1
 FAILS=0
 while true; do
+  zb_check
   case "$($WL PM 2>/dev/null)" in
     0*) ;;
     *) $WL PM 0 && log "wifi power save turned off" ;;

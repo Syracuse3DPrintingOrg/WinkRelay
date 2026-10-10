@@ -70,5 +70,5 @@ Raw counts, about 256 in the dark with about 20 counts of noise, and
 occasional one second spikes to about 508 that mean nothing. Useful for
 "is the light on", not for lux.
 
-Next: you are done. If something misbehaves, see
-[troubleshooting](troubleshooting.md).
+That is the whole setup. Optional next: [make it a Zigbee router](7-zigbee-router.md).
+If something misbehaves, see [troubleshooting](troubleshooting.md).

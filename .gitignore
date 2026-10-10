@@ -13,3 +13,4 @@ daemon/out/
 daemon/.cache/
 device/backup/
 __pycache__/
+zigbee/out/
